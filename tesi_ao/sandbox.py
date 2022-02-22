@@ -6,3 +6,8 @@ def pippo():
 
 def pluto():
     pass
+
+
+def ciao():
+    return "ciao!"
+# prova
