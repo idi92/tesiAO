@@ -2,6 +2,7 @@
 import numpy as np
 from plico_interferometer import interferometer
 from plico_dm import deformableMirror
+from astropy.io import fits
 
 
 def pippo():
@@ -30,13 +31,13 @@ class CommandToPositionLinearizer(object):
     def __init__(self, interferometer, mems_deformable_mirror):
         self._interf = interferometer
         self._bmc = mems_deformable_mirror
-        self._n_acts = self._bmc.getNumberOfModes()
+        self._n_acts = self._bmc.get_number_of_modes()
         self._wfflat = None
 
     def _get_zero_command_wavefront(self):
         if self._wfflat is None:
             cmd = np.zeros(self._n_acts)
-            self._bmc.setShape(cmd)
+            self._bmc.set_shape(cmd)
             self._wfflat = self._interf.wavefront(
                 self.NUMBER_WAVEFRONTS_TO_AVERAGE)
         return self._wfflat
@@ -50,7 +51,7 @@ class CommandToPositionLinearizer(object):
 
         wfflat = self._get_zero_command_wavefront()
 
-        self._cmd_vector = np.linspace(0., 1,
+        self._cmd_vector = np.linspace(0, 1,
                                        self.NUMBER_STEPS_VOLTAGE_SCAN)
         self._wfs = np.ma.zeros(
             (n_acts_to_meas, self.NUMBER_STEPS_VOLTAGE_SCAN,
@@ -61,7 +62,7 @@ class CommandToPositionLinearizer(object):
                 print("Act:%d - command %g" % (act, cmdi))
                 cmd = np.zeros(self._n_acts)
                 cmd[act] = cmdi
-                self._bmc.setShape(cmd)
+                self._bmc.set_shape(cmd)
                 self._wfs[act_idx, cmd_idx, :,
                           :] = self._get_wavefront_flat_subtracted()
 
@@ -102,6 +103,22 @@ class CommandToPositionLinearizer(object):
         c = self._quadratic_coeffs[act, 2]
         v = (-b - np.sqrt(b**2 - 4 * a * (c - p))) / (2 * a)
         return v
+
+    def save_results(self, fname):
+        fits.writeto(fname, self._wfs.data)
+        fits.append(fname, self._wfs.mask.astype(int))
+        fits.append(fname, self._cmd_vector)
+        fits.append(fname, np.array(self._actuators_list))
+
+    def load_results(self, fname):
+        header = fits.getheader(fname)
+        hduList = fits.open(fname)
+        wfs_data = hduList[0].data
+        wfs_mask = hduList[1].data.astype(bool)
+        wfs = np.ma.masked_array(data=wfs_data, mask=wfs_mask)
+        cmd_vector = hduList[2].data
+        actuators_list = hduList[3].data
+        return wfs, cmd_vector, actuators_list, header
 
 
 class Robaccia220223(object):
