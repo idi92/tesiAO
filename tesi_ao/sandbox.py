@@ -46,19 +46,24 @@ class CommandToPositionLinearizer(object):
         if act_list is None:
             act_list = np.arange(self._n_acts)
 
-        self._actuators_list = act_list
+        self._actuators_list = np.array(act_list)
         n_acts_to_meas = len(self._actuators_list)
 
         wfflat = self._get_zero_command_wavefront()
 
-        self._cmd_vector = np.linspace(0, 1,
-                                       self.NUMBER_STEPS_VOLTAGE_SCAN)
+        reference_cmds = self._bmc.get_reference_shape()
+
+        self._cmd_vector = np.zeros((n_acts_to_meas,
+                                     self.NUMBER_STEPS_VOLTAGE_SCAN))
+
         self._wfs = np.ma.zeros(
             (n_acts_to_meas, self.NUMBER_STEPS_VOLTAGE_SCAN,
              wfflat.shape[0], wfflat.shape[1]))
 
         for act_idx, act in enumerate(self._actuators_list):
-            for cmd_idx, cmdi in enumerate(self._cmd_vector):
+            self._cmd_vector[act_idx] = np.linspace(
+                0, 1, self.NUMBER_STEPS_VOLTAGE_SCAN) - reference_cmds[act]
+            for cmd_idx, cmdi in enumerate(self._cmd_vector[act_idx]):
                 print("Act:%d - command %g" % (act, cmdi))
                 cmd = np.zeros(self._n_acts)
                 cmd[act] = cmdi
@@ -76,31 +81,53 @@ class CommandToPositionLinearizer(object):
 
     def _max_wavefront(self, act, cmd_index):
         wf = self._wfs[act, cmd_index]
-        return np.max(np.abs(wf))
+        coord_max = np.argwhere(np.abs(wf) == np.max(np.abs(wf)))[0]
+        return wf[coord_max[0], coord_max[1]]
+
+    def _max_roi_wavefront(self, act, cmd_index):
+        wf = self._wfs[act, cmd_index]
+        b, t, l, r = self._get_max_roi(act)
+        wfroi = wf[b:t, l:r]
+        coord_max = np.argwhere(
+            np.abs(wfroi) == np.max(np.abs(wfroi)))[0]
+        return wfroi[coord_max[0], coord_max[1]]
+
+    def _get_max_roi(self, act):
+        roi_size = 50
+        wf = self._wfs[act, 0]
+        coord_max = np.argwhere(np.abs(wf) == np.max(np.abs(wf)))[0]
+        return coord_max[0] - roi_size, coord_max[0] + roi_size, \
+            coord_max[1] - roi_size, coord_max[1] + roi_size
 
     def _max_vector(self, act):
         res = np.zeros(self.NUMBER_STEPS_VOLTAGE_SCAN)
         for i in range(self.NUMBER_STEPS_VOLTAGE_SCAN):
-            res[i] = self._max_wavefront(act, i)
+            res[i] = self._max_roi_wavefront(act, i)
         return res
 
-    def _quadratic_fit(self):
+    def quadratic_fit(self):
         n_acts_to_meas = len(self._actuators_list)
         self._quadratic_coeffs = np.zeros((n_acts_to_meas, 3))
 
         for index in range(n_acts_to_meas):
-            x = self._cmd_vector
+            x = self._cmd_vector[index]
             y = self._max_vector(index)
             res = np.polyfit(x, y, 2)
             self._quadratic_coeffs[index] = res
 
-    def v2p(self, v):
-        return self.a * v**2 + self.b * v + self.c
+    def _get_quadratic_coeffs(self, act):
+        actidx = np.argwhere(self._actuators_list == act)[0][0]
+        a = self._quadratic_coeffs[actidx, 0]
+        b = self._quadratic_coeffs[actidx, 1]
+        c = self._quadratic_coeffs[actidx, 2]
+        return a, b, c
 
-    def p2v(self, act, p):
-        a = self._quadratic_coeffs[act, 0]
-        b = self._quadratic_coeffs[act, 1]
-        c = self._quadratic_coeffs[act, 2]
+    def c2p(self, act, v):
+        a, b, c = self._get_quadratic_coeffs(act)
+        return a * v**2 + b * v + c
+
+    def p2c(self, act, p):
+        a, b, c = self._get_quadratic_coeffs(act)
         v = (-b - np.sqrt(b**2 - 4 * a * (c - p))) / (2 * a)
         return v
 
@@ -108,7 +135,9 @@ class CommandToPositionLinearizer(object):
         fits.writeto(fname, self._wfs.data)
         fits.append(fname, self._wfs.mask.astype(int))
         fits.append(fname, self._cmd_vector)
-        fits.append(fname, np.array(self._actuators_list))
+        fits.append(fname, self._actuators_list)
+        fits.append(fname, self._bmc.get_reference_shape())
+        fits.append(fname, self._quadratic_coeffs)
 
     def load_results(self, fname):
         header = fits.getheader(fname)
@@ -118,7 +147,9 @@ class CommandToPositionLinearizer(object):
         wfs = np.ma.masked_array(data=wfs_data, mask=wfs_mask)
         cmd_vector = hduList[2].data
         actuators_list = hduList[3].data
-        return wfs, cmd_vector, actuators_list, header
+        reference_commands = hduList[4].data
+        quadratic_coeffs = hduList[5].data
+        return wfs, cmd_vector, actuators_list, reference_commands, quadratic_coeffs, header
 
 
 class Robaccia220223(object):
