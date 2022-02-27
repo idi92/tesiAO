@@ -3,18 +3,7 @@ import numpy as np
 from plico_interferometer import interferometer
 from plico_dm import deformableMirror
 from astropy.io import fits
-
-
-def pippo():
-    return 44
-
-
-def pluto():
-    pass
-
-
-def ciao():
-    return "ciao!"
+from scipy.interpolate.interpolate import interp1d
 
 
 def create_devices():
@@ -23,7 +12,7 @@ def create_devices():
     return wyko, bmc
 
 
-class CommandToPositionLinearizer(object):
+class CommandToPositionLinearizationMeasurer(object):
 
     NUMBER_WAVEFRONTS_TO_AVERAGE = 3
     NUMBER_STEPS_VOLTAGE_SCAN = 11
@@ -51,7 +40,8 @@ class CommandToPositionLinearizer(object):
 
         wfflat = self._get_zero_command_wavefront()
 
-        reference_cmds = self._bmc.get_reference_shape()
+        self._reference_cmds = self._bmc.get_reference_shape()
+        self._reference_tag = self._bmc.get_reference_shape_tag()
 
         self._cmd_vector = np.zeros((n_acts_to_meas,
                                      self.NUMBER_STEPS_VOLTAGE_SCAN))
@@ -62,7 +52,7 @@ class CommandToPositionLinearizer(object):
 
         for act_idx, act in enumerate(self._actuators_list):
             self._cmd_vector[act_idx] = np.linspace(
-                0, 1, self.NUMBER_STEPS_VOLTAGE_SCAN) - reference_cmds[act]
+                0, 1, self.NUMBER_STEPS_VOLTAGE_SCAN) - self._reference_cmds[act]
             for cmd_idx, cmdi in enumerate(self._cmd_vector[act_idx]):
                 print("Act:%d - command %g" % (act, cmdi))
                 cmd = np.zeros(self._n_acts)
@@ -78,6 +68,43 @@ class CommandToPositionLinearizer(object):
 
     def _reset_flat_wavefront(self):
         self._wfflat = None
+
+    def save_results(self, fname):
+        hdr = fits.Header()
+        hdr['REF_TAG'] = self._reference_tag
+        fits.writeto(fname, self._wfs.data, hdr)
+        fits.append(fname, self._wfs.mask.astype(int))
+        fits.append(fname, self._cmd_vector)
+        fits.append(fname, self._actuators_list)
+        fits.append(fname, self._reference_cmds)
+
+    @staticmethod
+    def load(fname):
+        header = fits.getheader(fname)
+        hduList = fits.open(fname)
+        wfs_data = hduList[0].data
+        wfs_mask = hduList[1].data.astype(bool)
+        wfs = np.ma.masked_array(data=wfs_data, mask=wfs_mask)
+        cmd_vector = hduList[2].data
+        actuators_list = hduList[3].data
+        reference_commands = hduList[4].data
+        return {'wfs': wfs,
+                'cmd_vector': cmd_vector,
+                'actuators_list': actuators_list,
+                'reference_shape': reference_commands,
+                'reference_shape_tag': header['REF_TAG']
+                }
+
+
+class CommandToPositionLinearizationAnalyzer(object):
+
+    def __init__(self, scan_fname):
+        res = CommandToPositionLinearizationMeasurer.load(scan_fname)
+        self._wfs = res['wfs']
+        self._cmd_vector = res['cmd_vector']
+        self._actuators_list = res['actuators_list']
+        self._reference_shape_tag = res['reference_shape_tag']
+        self._n_steps_voltage_scan = self._wfs.shape[1]
 
     def _max_wavefront(self, act, cmd_index):
         wf = self._wfs[act, cmd_index]
@@ -100,10 +127,78 @@ class CommandToPositionLinearizer(object):
             coord_max[1] - roi_size, coord_max[1] + roi_size
 
     def _max_vector(self, act):
-        res = np.zeros(self.NUMBER_STEPS_VOLTAGE_SCAN)
-        for i in range(self.NUMBER_STEPS_VOLTAGE_SCAN):
+        res = np.zeros(self._n_steps_voltage_scan)
+        for i in range(self._n_steps_voltage_scan):
             res[i] = self._max_roi_wavefront(act, i)
         return res
+
+    def _compute_maximum_deflection(self):
+        self._max_deflection = np.array([
+            self._max_vector(i) for i in range(len(self._actuators_list))])
+
+    def compute_linearization(self):
+        self._compute_maximum_deflection()
+
+        return MemsCommandLinearization(
+            self._actuators_list,
+            self._cmd_vector,
+            self._max_deflection,
+            self._reference_shape_tag)
+
+
+class MemsCommandLinearization():
+
+    def __init__(self,
+                 actuators_list,
+                 cmd_vector,
+                 deflection,
+                 reference_shape_tag):
+        self._actuators_list = actuators_list
+        self._cmd_vector = cmd_vector
+        self._deflection = deflection
+        self._reference_shape_tag = reference_shape_tag
+        self._create_interpolation()
+
+    def _create_interpolation(self):
+        self._finter = [interp1d(
+            self._deflection[i], self._cmd_vector[i], kind='cubic')
+            for i in range(self._cmd_vector.shape[0])]
+
+    def _get_act_idx(self, act):
+        return np.argwhere(self._actuators_list == act)[0][0]
+
+    def p2c(self, act, p):
+        idx = self._get_act_idx(act)
+        return self._finter[idx](p)
+
+    def save(self, fname):
+        hdr = fits.Header()
+        hdr['REF_TAG'] = self._reference_shape_tag
+        fits.writeto(fname, self._actuators_list, hdr)
+        fits.append(fname, self._cmd_vector)
+        fits.append(fname, self._deflection)
+
+    @staticmethod
+    def load(fname):
+        header = fits.getheader(fname)
+        hduList = fits.open(fname)
+        actuators_list = hduList[0].data
+        cmd_vector = hduList[1].data
+        deflection = hduList[2].data
+        reference_shape_tag = header['REF_TAG']
+        return MemsCommandLinearization(
+            actuators_list, cmd_vector, deflection, reference_shape_tag)
+
+
+class Robaccia220223(object):
+
+    def __init__(self, cmd_vector, amplitude_vector):
+        x = cmd_vector
+        y = amplitude_vector
+        res = np.polyfit(x, y, 2)
+        self.a = res[0]
+        self.b = res[1]
+        self.c = res[2]
 
     def quadratic_fit(self):
         n_acts_to_meas = len(self._actuators_list)
@@ -129,42 +224,4 @@ class CommandToPositionLinearizer(object):
     def p2c(self, act, p):
         a, b, c = self._get_quadratic_coeffs(act)
         v = (-b - np.sqrt(b**2 - 4 * a * (c - p))) / (2 * a)
-        return v
-
-    def save_results(self, fname):
-        fits.writeto(fname, self._wfs.data)
-        fits.append(fname, self._wfs.mask.astype(int))
-        fits.append(fname, self._cmd_vector)
-        fits.append(fname, self._actuators_list)
-        fits.append(fname, self._bmc.get_reference_shape())
-        fits.append(fname, self._quadratic_coeffs)
-
-    def load_results(self, fname):
-        header = fits.getheader(fname)
-        hduList = fits.open(fname)
-        wfs_data = hduList[0].data
-        wfs_mask = hduList[1].data.astype(bool)
-        wfs = np.ma.masked_array(data=wfs_data, mask=wfs_mask)
-        cmd_vector = hduList[2].data
-        actuators_list = hduList[3].data
-        reference_commands = hduList[4].data
-        quadratic_coeffs = hduList[5].data
-        return wfs, cmd_vector, actuators_list, reference_commands, quadratic_coeffs, header
-
-
-class Robaccia220223(object):
-
-    def __init__(self, cmd_vector, amplitude_vector):
-        x = cmd_vector
-        y = amplitude_vector
-        res = np.polyfit(x, y, 2)
-        self.a = res[0]
-        self.b = res[1]
-        self.c = res[2]
-
-    def v2p(self, v):
-        return self.a * v**2 + self.b * v + self.c
-
-    def p2v(self, p):
-        v = (-self.b - np.sqrt(self.b**2 - 4 * self.a * (self.c - p))) / (2 * self.a)
         return v
