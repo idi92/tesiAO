@@ -14,13 +14,13 @@ def create_devices():
 
 class CommandToPositionLinearizationMeasurer(object):
 
-    NUMBER_WAVEFRONTS_TO_AVERAGE = 3
+    NUMBER_WAVEFRONTS_TO_AVERAGE = 1
     NUMBER_STEPS_VOLTAGE_SCAN = 11
 
     def __init__(self, interferometer, mems_deformable_mirror):
         self._interf = interferometer
         self._bmc = mems_deformable_mirror
-        self._n_acts = self._bmc.get_number_of_modes()
+        self._n_acts = self._bmc.get_number_of_actuators()
         self._wfflat = None
 
     def _get_zero_command_wavefront(self):
@@ -72,6 +72,7 @@ class CommandToPositionLinearizationMeasurer(object):
     def save_results(self, fname):
         hdr = fits.Header()
         hdr['REF_TAG'] = self._reference_tag
+        hdr['N_AV_FR'] = self.NUMBER_WAVEFRONTS_TO_AVERAGE
         fits.writeto(fname, self._wfs.data, hdr)
         fits.append(fname, self._wfs.mask.astype(int))
         fits.append(fname, self._cmd_vector)
@@ -106,14 +107,14 @@ class CommandToPositionLinearizationAnalyzer(object):
         self._reference_shape_tag = res['reference_shape_tag']
         self._n_steps_voltage_scan = self._wfs.shape[1]
 
-    def _max_wavefront(self, act, cmd_index):
-        wf = self._wfs[act, cmd_index]
+    def _max_wavefront(self, act_idx, cmd_index):
+        wf = self._wfs[act_idx, cmd_index]
         coord_max = np.argwhere(np.abs(wf) == np.max(np.abs(wf)))[0]
         return wf[coord_max[0], coord_max[1]]
 
-    def _max_roi_wavefront(self, act, cmd_index):
-        wf = self._wfs[act, cmd_index]
-        b, t, l, r = self._get_max_roi(act)
+    def _max_roi_wavefront(self, act_idx, cmd_index):
+        wf = self._wfs[act_idx, cmd_index]
+        b, t, l, r = self._get_max_roi(act_idx)
         wfroi = wf[b:t, l:r]
         coord_max = np.argwhere(
             np.abs(wfroi) == np.max(np.abs(wfroi)))[0]
@@ -126,15 +127,15 @@ class CommandToPositionLinearizationAnalyzer(object):
         return coord_max[0] - roi_size, coord_max[0] + roi_size, \
             coord_max[1] - roi_size, coord_max[1] + roi_size
 
-    def _max_vector(self, act):
+    def _max_vector(self, act_idx):
         res = np.zeros(self._n_steps_voltage_scan)
         for i in range(self._n_steps_voltage_scan):
-            res[i] = self._max_roi_wavefront(act, i)
+            res[i] = self._max_roi_wavefront(act_idx, i)
         return res
 
     def _compute_maximum_deflection(self):
         self._max_deflection = np.array([
-            self._max_vector(i) for i in range(len(self._actuators_list))])
+            self._max_vector(act_idx) for act_idx in range(len(self._actuators_list))])
 
     def compute_linearization(self):
         self._compute_maximum_deflection()
@@ -188,6 +189,33 @@ class MemsCommandLinearization():
         reference_shape_tag = header['REF_TAG']
         return MemsCommandLinearization(
             actuators_list, cmd_vector, deflection, reference_shape_tag)
+
+
+def main220228():
+    mcl = MemsCommandLinearization.load('/tmp/mcl9.fits')
+    print('reference shape used when calibrating %s ' %
+          mcl._reference_shape_tag)
+    actuator_number = 63
+    deflection_wrt_reference_shape = 100e-9
+    mcl.p2c(actuator_number, deflection_wrt_reference_shape)
+
+
+def main_calibration(wyko,
+                     bmc,
+                     mcl_fname='/tmp/mcl0.fits',
+                     scan_fname='/tmp/cpl0.fits',
+                     act_list=None):
+    #wyko, bmc = create_devices()
+    cplm = CommandToPositionLinearizationMeasurer(wyko, bmc)
+
+    if act_list is None:
+        act_list = np.arange(bmc.get_number_of_actuators())
+    cplm.execute_command_scan(act_list)
+    cplm.save_results(scan_fname)
+    cpla = CommandToPositionLinearizationAnalyzer(scan_fname)
+    mcl = cpla.compute_linearization()
+    mcl.save(mcl_fname)
+    return mcl, cplm, cpla
 
 
 class Robaccia220223(object):
