@@ -22,3 +22,10 @@ def plot_calibration_reproducibility():
     plt.grid(True)
     plt.xlabel('Command [au]')
     plt.ylabel('Deflection error wrt meas0 [au]')
+
+
+def main_calibrate_all_actuators():
+    wyko, bmc = sandbox.create_devices()
+    mcl, cplm, cpla = sandbox.main_calibration(
+        wyko, bmc, mcl_fname='/tmp/mcl_all.fits', scan_fname='/tmp/cpl_all.fits')
+    return mcl, cplm, cpla
