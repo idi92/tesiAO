@@ -4,6 +4,7 @@ from plico_interferometer import interferometer
 from plico_dm import deformableMirror
 from astropy.io import fits
 from scipy.interpolate.interpolate import interp1d
+from functools import reduce
 
 
 def create_devices():
@@ -253,3 +254,69 @@ class Robaccia220223(object):
         a, b, c = self._get_quadratic_coeffs(act)
         v = (-b - np.sqrt(b**2 - 4 * a * (c - p))) / (2 * a)
         return v
+
+
+# provata con il file cpl_all fatto il 28/2 che ti ho messo sulla chiavetta
+def provarec(cplm, cpla):
+    # maschera intersezione di tutte le maschere delle wf map misurate
+    imask = reduce(lambda a, b: np.ma.mask_or(a, b), cplm._wfs[:, 7].mask)
+
+    # normalizzo la mappa di fase dell'attuatore act a max==1
+    # scelgo il comando 7: è una deformata di circa 500nm (quindi ben sopra al
+    # rumore dell'interferometro)
+    # e non troppo grossa da saturare l'interferometro: per tutti i 140
+    # attuatori la mappa del comando 7 non presenta "buchi"
+    #
+    # la funzione ritorna un vettore contenente i valori del wf nei punti
+    # dentro la maschera imask
+    def normalizeif(act):
+        return (cplm._wfs[act, 7][imask == False] / cpla._max_deflection[act, 7]).data
+
+    # creo una "matrice di interazione" giustapponendo in colonna i vettori
+    # normalizzati
+    im = np.column_stack([normalizeif(i) for i in cpla._actuators_list])
+
+    # pseudo inversa della matrice di interazione
+    rec = np.linalg.pinv(im)
+
+    # questo prodotto matriciale fra rec e una mappa di fase qualsiasi restituisce
+    # le 140 posizioni in cui comandare gli attuatori per ottenere wfmap
+    def wf2pos(wfmap):
+        return np.dot(rec, wfmap[imask == False])
+
+    # creo un tilt (da -100 a 100nm lungo ogni riga, tutte le righe sono uguali
+    wftilt = np.tile(np.linspace(-100e-9, 100e-9, 640), (486, 1))
+    # lo converto in masked_array per coerenza col resto
+    wftilt = np.ma.array(data=wftilt, mask=imask)
+
+    # postilt è il comando da dare agli attuatori per ottenere wftilt
+    postilt = wf2pos(wftilt)
+    # bisognerebbe controllare che nessun elemento sia troppo grande,
+    # altrimenti lo specchio non riesce a fare la deformata richiesta
+
+    # wffitted è la mappa di fase che mi aspetto di ottenere davvero:
+    # è il miglior fit che lo specchio riesce a fare di wftilt
+    wffitted = np.zeros((486, 640))
+    wffitted[imask == False] = np.dot(im, postilt)
+    wffitted = np.ma.array(data=wffitted, mask=imask)
+
+    print("mode amplitude: %g nm rms " % wftilt.std())
+    fitting_error = (wffitted - wftilt).std()
+    print("fitting error: %g nm rms " % fitting_error)
+
+    # posso rifarlo con un modo ad alta frequenza (tipo un seno che oscilla 15
+    # volte in 640 px)
+    wfsin = np.tile(100e-9 * np.sin(2 * np.pi / 43 * np.arange(640)), (486, 1))
+    wfsin = np.ma.array(data=wfsin, mask=imask)
+
+    possin = wf2pos(wfsin)
+
+    sinfitted = np.zeros((486, 640))
+    sinfitted[imask == False] = np.dot(im, possin)
+    sinfitted = np.ma.array(data=sinfitted, mask=imask)
+
+    # il fitting error su questo modo è 2nm rms
+    fitting_error_sin = (sinfitted - wfsin).std()
+
+    print("mode amplitude sin: %g nm rms " % wfsin.std())
+    print("fitting error: %g nm rms " % fitting_error_sin)

@@ -1,5 +1,6 @@
 from tesi_ao import sandbox, package_data
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def plot_calibration_reproducibility():
@@ -29,3 +30,9 @@ def main_calibrate_all_actuators():
     mcl, cplm, cpla = sandbox.main_calibration(
         wyko, bmc, mcl_fname='/tmp/mcl_all.fits', scan_fname='/tmp/cpl_all.fits')
     return mcl, cplm, cpla
+
+
+def max_wavefront(wf):
+    coord_max = np.argwhere(
+        np.abs(wf) == np.max(np.abs(wf)))[0]
+    return wf[coord_max[0], coord_max[1]], coord_max
