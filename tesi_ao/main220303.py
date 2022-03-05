@@ -4,16 +4,44 @@ import numpy as np
 from astropy.io import fits
 
 
+def _what_I_do_on_terminal():  # don't use!
+    '''
+    an example of how I used main220303
+    '''
+    iea = InterpolationErrorAnalyzer()
+    # set actuator (default in 63)
+    iea.ACTUATOR = 63
+    # set scan sampling list (default[10,20,...,60, 100])
+    iea.NUM_SCAN_LIST = [10, 20]
+    # do and save WF maps for each scan sampling
+    iea.do_more_scans('_v0')
+    # load mcl objects into a list
+    mcls = iea.load_mcls('_v0')  # use _f0 for the default scan sampling list
+    iea.plot_all_interpolation_functions(mcls)
+    iea.plot_interpolation_error(mcls)
+    # from the 'old' mcls elements, we need the interpolated functions
+    # to compute p2c and save the a 'new' measured mcl object
+    iea.do_calibrated_measure(mcls, '_v1')  # use _z1 for default
+    # load new mcl
+    mcls_meas = iea.load_calibrated_measure('_v1')
+    # Plot the difference between the measured and expected deflection, as a
+    # function of the expected one
+    iea.plot_Measured_vs_Expected(mcls_meas)
+
+
 class InterpolationErrorAnalyzer():
 
-    ACTUATOR = 63
-    NUM_SCAN_LIST = [10, 20, 30, 40, 50, 60, 100]
+    ACTUATOR = 63  # the following is related to this actuator
+    NUM_SCAN_LIST = [10, 20, 30, 40, 50, 60, 100]  # scan sampling
     test_points = 10
     fpath = 'prova/act%d' % ACTUATOR + '/main220303/cplm'
     ffmt = '.fits'
 
     def _execute_measure(self, fname, Nscan):
-
+        '''
+        Executes WF maps measure, one for each scan, and saves the
+        related CPLM object into fname.fits.  
+        '''
         act_list = [self.ACTUATOR]
 
         wyko, bmc = sandbox.create_devices()
@@ -27,7 +55,11 @@ class InterpolationErrorAnalyzer():
         cplm.save_results(fname)
 
     def _get_mcl_from_file(self, fname):
-
+        '''
+        From a fits file, loads CPLA object and evaluating 
+        interpolation function.
+        Returns the related MemsCommandLinearization object.
+        '''
         cpla = sandbox.CommandToPositionLinearizationAnalyzer(fname)
         mcl = cpla.compute_linearization()
 
@@ -48,7 +80,11 @@ class InterpolationErrorAnalyzer():
         plt.plot(f_int(span), span, '-', color=plt.gca().lines[-1].get_color())
 
     def do_more_scans(self, version_file):
-
+        '''
+        For each scan sampling defined in NUM_SCAN_LIST, 
+        executes WF mapping through the class objects CPLM and CPLA defined in sandbox.py,
+        and saves into file.fits        
+        '''
         for scans in self.NUM_SCAN_LIST:
             print('\n%d voltage scans:' % scans)
             fname = self.fpath + '%d' % scans + version_file + self.ffmt
@@ -56,7 +92,12 @@ class InterpolationErrorAnalyzer():
 
     def load_mcls(self, version_file):
         '''
-        Loads MemsCommandLinarization objects in a list
+        Loads MemsCommandLinearization objects defined in sandbox.py,
+        computed by do_more_scans
+        and returns them into a list.  
+        Input: string,'vesion_file'
+        Return: list, mcl_list 
+        len(mcl_list) == number of interpolated function (one for each scan sampling)
         '''
         mcl_list = []
 
@@ -67,7 +108,10 @@ class InterpolationErrorAnalyzer():
         return mcl_list
 
     def plot_all_interpolation_functions(self, mcl_list):
-
+        '''
+        Plots all interpolated functions obtained by varying scan sampling,
+        as a function of actuator's deflections.
+        '''
         plt.figure(101)
         plt.clf()
         plt.ion()
@@ -82,12 +126,18 @@ class InterpolationErrorAnalyzer():
         plt.legend(loc='best')
 
     def plot_interpolation_error(self, mcl_list):
-
+        '''
+        Plots the difference between all the interpolated function with
+        respect to the one computed with the biggest scan sampling, as a function of
+        actuators deflections.
+        Input: list, mcl_list 
+        '''
         Npt = 1024
 
         min_container = []
         max_container = []
-
+        # looking for the common deflections domain for the interpolated
+        # functions
         for mcl in mcl_list:
 
             min_container.append(min(mcl._deflection[0]))
@@ -97,7 +147,8 @@ class InterpolationErrorAnalyzer():
         common_span_deflections = np.linspace(
             max(min_container), min(max_container), Npt)
 
-        f_ref = mcl_list[-1]._finter[0]  # interp func with the biggest #scans
+        # interpolated function with the biggest scans sampling
+        f_ref = mcl_list[-1]._finter[0]
 
         plt.figure(102)
         plt.clf()
@@ -116,7 +167,14 @@ class InterpolationErrorAnalyzer():
         plt.xlabel('Deflection [m]')
 
     def do_calibrated_measure(self, mcl_list, version):
-
+        '''
+        Though the interpolated functions contained in the 'old' MCL objects 
+        and listed in mcl_list, saves new WF maps using converted
+        actuator's deflections (calling p2c and MyCalibrationMeasurer class as defined below).
+        Input:
+        list, mcl_list
+        string, 'file version'
+        '''
         Npt = self.test_points
         self.NUM_SCAN_LIST
 
@@ -136,7 +194,12 @@ class InterpolationErrorAnalyzer():
             mcm.save_results(fname)
 
     def load_calibrated_measure(self, version):
-
+        '''
+        Loads the 'new' mcl objects from file created by do_calibrated_measure,
+        and returns them into a list.
+        Input: string, 'file_version'
+        Return: list, mcl_list
+        '''
         mcl_list = []
         Npt = self.test_points
         for scans in self.NUM_SCAN_LIST:
@@ -147,12 +210,17 @@ class InterpolationErrorAnalyzer():
         return mcl_list
 
     def plot_Measured_vs_Expected(self, mcl_meas):
-
+        '''
+        Plots the difference between the measured and expected deflection,
+        as a function of the expected one. 
+        mcl_meas[i]== element of the list loaded from load_calibrated_measure
+        Input: list, mcls_meas 
+        '''
         Npt = self.test_points
 
         plt.figure(456)
         plt.clf()
-        x_exp = np.linspace(-800e-9, 1600e-9, Npt)
+        x_exp = np.linspace(-800e-9, 1600e-9, Npt)  # expected deflections
         for idx in np.arange(len(mcl_meas)):
 
             x_obs = mcl_meas[idx]._deflection[0]
@@ -171,7 +239,12 @@ class InterpolationErrorAnalyzer():
 
 # similar to CommandtoPositionLinearizationMeasurer
 class MyCalibrationMeasurer(object):  # changes when bmc set shape
-
+    '''
+    As CommandToPositionLinearizationMeasurer defined in sandbox.py, 
+    acquires WF maps, one for each expected deflection command. 
+    These deflections are converted in voltage commands through 
+    p2c function stored in MCL object.
+    '''
     NUMBER_WAVEFRONTS_TO_AVERAGE = 1
     NUMBER_STEPS_VOLTAGE_SCAN = 10
 
