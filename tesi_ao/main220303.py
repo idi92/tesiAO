@@ -12,7 +12,7 @@ def _what_I_do_on_terminal():  # don't use!
     # set actuator (default in 63)
     iea.ACTUATOR = 63
     # set scan sampling list (default[10,20,...,60, 100])
-    iea.NUM_SCAN_LIST = [10, 20]
+    iea.NUM_SCAN_LIST = [10, 20, 30, 50]
     # do and save WF maps for each scan sampling
     iea.do_more_scans('_v0')
     # load mcl objects into a list
