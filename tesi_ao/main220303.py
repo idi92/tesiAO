@@ -8,36 +8,38 @@ def _what_I_do_on_terminal():  # don't use!
     '''
     an example of how I used main220303
     '''
-    iea = InterpolationErrorAnalyzer()
-    # set actuator (default in 63)
-    iea.ACTUATOR = 63
-    # set scan sampling list (default[10,20,...,60, 100])
-    iea.NUM_SCAN_LIST = [10, 20, 30, 50]
+    iea = InterpolationErrorAnalyzer(ACTUATOR=63, NUM_SCAN_LIST=[
+                                     10, 20, 30, 40, 50, 60, 100], test_points=20)
+
     # do and save WF maps for each scan sampling
-    iea.do_more_scans('_v0')
+    iea.do_more_scans('_f0')
     # load mcl objects into a list
-    # use _f0 for the default scan sampling list
-    mcls_int = iea.load_mcls('_v0')
+    mcls_int = iea.load_mcls('_f0')
+    # plot all the interpolated functions
     iea.plot_all_interpolation_functions(mcls_int)
-    iea.plot_interpolation_error(mcls_int)
+    # plot interpolated function difference wrt the one with the biggest
+    # samples
+    iea.plot_interpolation_difference(mcls_int)
     # from the 'old' mcls elements, we need the interpolated functions
     # to compute p2c and save the a 'new' measured mcl object
-    iea.do_calibrated_measure(mcls_int, '_v1')  # use _z1 for default
+    iea.do_calibrated_measure(mcls_int, '_z3')
     # load new mcl
-    mcls_meas = iea.load_calibrated_measure('_v1')
+    mcls_meas = iea.load_calibrated_measure('_z3')
     # Plot the difference between the measured and expected deflection, as a
     # function of the expected one
-    rms_list = iea.plot_Measured_vs_Expected(mcls_meas, mcls_int)
-    iea.fitting_Meas_vs_Exp(mcls_meas, rms_list, mcls_int)
+    rms_list = iea.plot_Measured_vs_Expected_common(mcls_meas, mcls_int)
+    iea.fitting_Meas_vs_Exp_common(mcls_meas, rms_list, mcls_int)
 
 
-class InterpolationErrorAnalyzer():
+class InterpolationErrorAnalyzer(object):
 
-    ACTUATOR = 63  # the following is related to this actuator
-    NUM_SCAN_LIST = [10, 20, 30, 40, 50, 60, 100]  # scan sampling
-    test_points = 10
-    fpath = 'prova/act%d' % ACTUATOR + '/main220303/cplm'
     ffmt = '.fits'
+
+    def __init__(self, ACTUATOR=63, NUM_SCAN_LIST=[10, 20, 30, 40, 50, 60, 100], test_points=10):
+        self.ACTUATOR = ACTUATOR
+        self.NUM_SCAN_LIST = NUM_SCAN_LIST
+        self.test_points = test_points
+        self.fpath = 'prova/act%d' % ACTUATOR + '/main220303/cplm'
 
     def _execute_measure(self, fname, Nscan):
         '''
@@ -143,7 +145,7 @@ class InterpolationErrorAnalyzer():
         plt.grid()
         plt.legend(loc='best')
 
-    def plot_interpolation_error(self, mcl_list):
+    def plot_interpolation_difference(self, mcl_list):
         '''
         Plots the difference between all the interpolated function with
         respect to the one computed with the biggest scan sampling, as a function of
@@ -188,7 +190,7 @@ class InterpolationErrorAnalyzer():
         string, 'file version'
         '''
         Npt = self.test_points
-        self.NUM_SCAN_LIST
+        # self.NUM_SCAN_LIST
 
         act_list = [self.ACTUATOR]
 
@@ -224,7 +226,7 @@ class InterpolationErrorAnalyzer():
 
         return mcl_list
 
-    def plot_Measured_vs_Expected(self, mcl_meas, mcl_int):
+    def plot_Measured_vs_Expected_common(self, mcl_meas, mcl_int):
         '''
         Plots the difference between the measured and expected deflection,
         as a function of the expected one. 
@@ -234,9 +236,11 @@ class InterpolationErrorAnalyzer():
         '''
         Npt = self.test_points
 
-        plt.figure(456 + self.ACTUATOR)
+        plt.figure(556 + self.ACTUATOR)
         plt.clf()
         min_span, max_span = self._get_common_deflection_range(mcl_int)
+        #min_span = -800e-9
+        #max_span = 1600e-9
         x_exp = np.linspace(min_span, max_span, Npt)  # expected deflections
         rms_list = []
         for idx in np.arange(len(mcl_meas)):
@@ -256,18 +260,21 @@ class InterpolationErrorAnalyzer():
         plt.xlabel('$x_{exp} [m]$', size=25)
         plt.ylabel('$x_{obs} - x_{exp} [m]$', size=25)
         plt.title('act#%d:' % self.ACTUATOR +
-                  ' Error in deflection cmds for each interpolation functions', size=25)
+                  ' Error in deflection cmds for each interpolation functions Common', size=25)
         return rms_list
 
-    def fitting_Meas_vs_Exp(self, mcl_meas, rms_list, mcl_int):
+        # something wrong
+    def fitting_Meas_vs_Exp_common(self, mcl_meas, rms_list, mcl_int):
         '''
         Plots the best fits for measured vs expected deflection, for each scan sampling.
         '''
         Npt = self.test_points
 
-        plt.figure(567 + self.ACTUATOR)
+        plt.figure(580 + self.ACTUATOR)
         plt.clf()
         min_span, max_span = self._get_common_deflection_range(mcl_int)
+        #min_span = -800e-9
+        #max_span = 1600e-9
         x_exp = np.linspace(min_span, max_span, Npt)
         ones = np.ones(Npt)
         xx = np.linspace(min_span, max_span, 1024)
@@ -280,11 +287,13 @@ class InterpolationErrorAnalyzer():
             sigma = ones * rms_list[idx]
             coeff, coeff_cov = np.polyfit(
                 x_exp, x_obs, 1, w=sigma, cov=True, full=False)
-            err_coeff = np.diag(np.sqrt(coeff_cov))
-            print('Fit relative to Sampling: %d scans)' %
+            err_coeff = np.sqrt(np.diag(coeff_cov))
+            print('\nFit relative to Sampling: %d scans)' %
                   self. NUM_SCAN_LIST[idx])
             print('A = %g' % coeff[0] + '\t+/- %g ' % err_coeff[0])
             print('offset = %g' % coeff[1] + '\t+/- %g' % err_coeff[1])
+            print('Cov Matrix:')
+            print(coeff_cov)
             fit_func = np.poly1d(coeff)
             plt.plot(xx, fit_func(xx), '-', label='relative fit',
                      color=plt.gca().lines[-1].get_color())
@@ -295,7 +304,7 @@ class InterpolationErrorAnalyzer():
         plt.xlabel('$x_{exp} [m]$', size=25)
         plt.ylabel('$x_{obs} [m]$', size=25)
         plt.title('act#%d:' % self.ACTUATOR +
-                  ' Error in deflection cmds for each interpolation functions', size=25)
+                  ' Common deflection span', size=25)
 
 # similar to CommandtoPositionLinearizationMeasurer
 
@@ -308,7 +317,7 @@ class MyCalibrationMeasurer(object):  # changes when bmc set shape
     p2c function stored in MCL object.
     '''
     NUMBER_WAVEFRONTS_TO_AVERAGE = 1
-    NUMBER_STEPS_VOLTAGE_SCAN = 10
+    #NUMBER_STEPS_VOLTAGE_SCAN = 10
 
     def __init__(self, interferometer, mems_deformable_mirror, mlc, expected_deflections):
         self._interf = interferometer
@@ -316,6 +325,7 @@ class MyCalibrationMeasurer(object):  # changes when bmc set shape
         self._n_acts = self._bmc.get_number_of_actuators()
         self._mlc = mlc
         self._exp_deflections = expected_deflections
+        self.NUMBER_STEPS_VOLTAGE_SCAN = len(expected_deflections)
         self._wfflat = None
 
     def _get_zero_command_wavefront(self):
