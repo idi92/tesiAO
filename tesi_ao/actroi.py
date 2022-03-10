@@ -4,6 +4,7 @@ from plico_dm import deformableMirror
 from astropy.io import fits
 import random
 from scipy.optimize import curve_fit
+from numpy import dtype
 
 
 def create_devices():
@@ -13,6 +14,8 @@ def create_devices():
 
 # Trying to spot the pixel area relative to the actuator
 # giving a one by one unit command
+# I want to estimate the rms in each actuator's pixel area
+# while MEMs has a flat shape(can t use abs...)
 # trying to execute a 2Dgaussian fit on peaks and save the relative amplitudes
 # pixel_area =?= sigmax*sigmay (estimated from gaussian fitting)
 
@@ -138,26 +141,53 @@ class ActuatorsRegionAnalyzer(object):
             self._max_vector(act_idx) for act_idx in range(len(self._actuators_list))])
 
     def _2dgaussian(self, X, amplitude, x0, y0, sigmax, sigmay, offset):
-        x, y = X
-        a = 0.5 * ((x - x0) / sigmax)**2
-        b = 0.5 * ((y - y0) / sigmay)**2
-        z = amplitude * np.exp(-(a + b)) + offset
-        return z
+        y, x = X
+        z = np.zeros((len(y), len(x)), dtype='float')
+        N = amplitude  # *0.5 / (np.pi * sigmax * sigmay)
+        for xi in np.arange(len(x)):
+            a = 0.5 * ((xi - x0) / sigmax)**2
+            for yi in np.arange(len(y)):
+                b = 0.5 * ((yi - y0) / sigmay)**2
 
-    def _gaussian_fitting(self, act_idx, cmd_index):
+                z[yi, xi] = N * np.exp(-(a + b)) + offset
+        return z.ravel()
+
+    def _gaussian_fitting(self, act_idx, cmd_index, print_res=False):
         wf = self._wfs[act_idx, cmd_index]
         b, t, l, r = self._get_max_roi(act_idx)
         wfroi = wf[b:t, l:r]
         z = wfroi
-        x = np.arange(wfroi.shape[1])
-        y = np.arange(wfroi.shape[0])
+        x = np.arange(wfroi.shape[1], dtype='float')
+        y = np.arange(wfroi.shape[0], dtype='float')
 
         A0 = self._max_roi_wavefront(act_idx, cmd_index)
         x0 = 49.
         y0 = 49.
-        sigma0 = z.std()
-        offset = 0
-        starting_values = [A0, x0, y0, sigma0, sigma0, offset]
-        #error: 'result not a proper array of floats...due masked array?'
-        ppar, pcov = curve_fit(self._2dgaussian, (x, y), z, p0 =starting_values)) 
-        return ppar, pcov
+        sigma0 = 25.
+        sigmax = sigma0
+        sigmay = sigma0
+        offset = 0.
+        starting_values = [A0, x0, y0, sigmax, sigmay, offset]
+        X = y, x
+
+        Z = np.zeros((len(y), len(x)), dtype='float')
+        for j in np.arange(len(y)):
+            prova = z[j].compressed()
+            Z[j] = prova
+
+        err_z = Z.std() * np.ones(len(x) * len(y))
+
+        # error: 'result not a proper array of floats...due masked array?'
+        fpar, fcov = curve_fit(self._2dgaussian, X,
+                               Z.ravel(), p0=starting_values, sigma=err_z, absolute_sigma=True)
+        err_fpar = np.sqrt(np.diag(fcov))
+        if(print_res == True):
+            str_list = ['Amp', 'x0', 'y0', 'sigmax', 'sigmay', 'offset']
+            for i in np.arange(len(fpar)):
+                print(str_list[i] + '\t= ' + '%g' %
+                      fpar[i] + '\t+/-\t %g' % err_fpar[i])
+            res = (Z.ravel() - self._2dgaussian(X, *fpar))
+            chi2 = np.sum((res / err_z)**2)
+            print('Chi^2 = %g' % chi2)
+
+        return fpar, fcov
