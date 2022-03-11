@@ -5,6 +5,43 @@ from astropy.io import fits
 import random
 
 
+def _what_Ive_done():
+    wyko, bmc = create_devices()
+    # static measure of Mems reference shape
+    fm100st = Flat_Measurer(wyko, bmc)
+    fm100st.NUMBER_STEPS_VOLTAGE_SCAN = 100  # repeated measures
+    fm100st.execute_static_scan([63])
+    fm100st.save_results('prova/act63/flatstab/fm100st.fits')
+
+    fa100st = Flat_Analyzer('prova/act63/flatstab/fm100st.fits')
+
+    rms100st = fa100st.get_rms_in_each_pixel()
+    plt.figure(123)
+    plt.clf()
+    # par_map[act, yi, xi] == rms_map[act, yi, xi]
+    plt.imshow(rms100st.par_map[0])
+    plt.colorbar()
+
+    rms100st.save_results('prova/act63/flatstab/rms100st.fits')
+    rms100st.load('prova/act63/flatstab/rms100st.fits')
+    # turning up and down repeated measures
+    fm100ud = Flat_Measurer(wyko, bmc)
+    fm100ud.NUMBER_STEPS_VOLTAGE_SCAN = 100  # repeated measures
+    fm100ud.execute_up_and_down_scan([63])
+    fm100ud.save_results('prova/act63/flatstab/fm100ud.fits')
+
+    fa100ud = Flat_Analyzer('prova/act63/flatstab/fm100ud.fits')
+
+    rms100ud = fa100ud.get_rms_in_each_pixel()
+    plt.figure(124)
+    plt.clf()
+    plt.imshow(rms100ud.par_map[0])
+    plt.colorbar()
+
+    rms100ud.save_results('prova/act63/flatstab/rms100st.fits')
+    rms100ud.load('prova/act63/flatstab/rms100st.fits')
+
+
 def create_devices():
     wyko = interferometer('193.206.155.29', 7300)
     bmc = deformableMirror('193.206.155.92', 7000)
@@ -147,35 +184,62 @@ class Flat_Analyzer(object):
         self._cmd_vector = res['cmd_vector']
         self._actuators_list = res['actuators_list']
         self._reference_shape_tag = res['reference_shape_tag']
-        self._n_steps_voltage_scan = self._wfs.shape[1]
+        self._num_of_measures = self._wfs.shape[1]
+
+    def get_rms_in_each_pixel(self):
+        '''
+        Estimates std.dev in each measured maps pixel
+        '''
+        rms_map = np.ma.empty_like(self._wfs.data[:, 0])
+
+        for act in np.arange(self._wfs.shape[0]):
+            for yi in np.arange(self._wfs.shape[2]):
+                for xi in np.arange(self._wfs.shape[3]):
+                    rms_map[act, yi, xi] = self._wfs[act, :, yi, xi].std()
+
+        return CollapsedMap(rms_map, self._actuators_list, self._num_of_measures)
+
+    def get_mean_in_each_pixel(self):
+
+        mean_map = np.ma.empty_like(self._wfs.data[:, 0])
+
+        for act in np.arange(self._wfs.shape[0]):
+            for yi in np.arange(self._wfs.shape[2]):
+                for xi in np.arange(self._wfs.shape[3]):
+                    mean_map[act, yi, xi] = self._wfs[act, :, yi, xi].mean()
+
+        return CollapsedMap(mean_map, self._actuators_list, self._num_of_measures)
+
+
+class CollapsedMap(object):
+
+    def __init__(self, par_map, act_list, num_of_meas):
+        self.par_map = par_map
+        self.act_list = act_list
+        self.num_of_meas = num_of_meas
+
+    def save_results(self, fname):
+        hdr = fits.Header()
+        hdr['N_Meas'] = self.num_of_meas
+        fits.writeto(fname, self.par_map.data, hdr)
+        fits.append(fname, self.par_map.mask.astype(int))
+        fits.append(fname, self.act_list)
+
+    @staticmethod
+    def load(fname):
+        header = fits.getheader(fname)
+        hduList = fits.open(fname)
+        par_data = hduList[0].data
+        par_mask = hduList[1].data.astype(bool)
+        par_map = np.ma.masked_array(data=par_data, mask=par_mask)
+        actuators_list = hduList[2].data
+        num_of_meas = header['N_Meas']
+
+        return CollapsedMap(par_map, actuators_list, num_of_meas)
 
     '''
     #I want to estimate the rms in each actuator's pixel area
     #while MEMs has a flat shape (trying to save them into a file
     #executed by actroi.py)
-
-    def _rms_roi_wavefront(self, act_idx, cmd_index):
-        wf = self._wfs[act_idx, cmd_index]
-        b, t, l, r = self._get_max_roi(act_idx)
-        wfroi = wf[b:t, l:r]
-        coord_max = np.argwhere(
-            np.abs(wfroi) == np.max(np.abs(wfroi)))[0]
-        return wfroi[coord_max[0], coord_max[1]]
-
-    def _get_rms_roi(self, act):
-        roi_size = 50
-        wf = self._wfs[act, 0]
-        coord_max = np.argwhere(np.abs(wf) == np.max(np.abs(wf)))[0]
-        return coord_max[0] - roi_size, coord_max[0] + roi_size, \
-            coord_max[1] - roi_size, coord_max[1] + roi_size    
-
-    def _rms_vector(self, act_idx):
-        res = np.zeros(self._n_steps_voltage_scan)
-        for i in range(self._n_steps_voltage_scan):
-            res[i] = self._rms_roi_wavefront(act_idx, i)
-        return res
-
-    def _compute_rms_around_act(self):
-        self._rms_act = np.array([
-            self._rms_vector(act_idx) for act_idx in range(len(self._actuators_list))])
+  
     '''
