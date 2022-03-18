@@ -89,14 +89,20 @@ class CommandToPositionLinearizationMeasurer(object):
     def _reset_flat_wavefront(self):
         self._wfflat = None
 
-    def check_mask_coverage(self):
+    def check_mask_coverage(self, ratio=False):
         masked_pixels = np.array([self._wfs[a, i].mask.sum() for a in range(
             self._wfs.shape[0]) for i in range(self._wfs.shape[1])])
+        titlestr = 'Number'
+        if(ratio == True):
+            masked_pixels = masked_pixels / \
+                (self._wfs.shape[2] * self._wfs.shape[3])
+            titlestr = 'Fraction'
         plt.figure()
         plt.clf()
         plt.ion()
         plt.plot(masked_pixels)
-        plt.ylabel('Number of Masked Pixels', size=25)
+
+        plt.ylabel(titlestr + ' of Masked Pixels', size=25)
         plt.xlabel('Measures', size=25)
         plt.title('Number of scans per actuator:%d' %
                   self._wfs.shape[1])
@@ -187,14 +193,20 @@ class CommandToPositionLinearizationAnalyzer(object):
         for idx, act in enumerate(act_list):
             self._wfs[act] = cpla_to_add._wfs[idx]
 
-    def check_mask_coverage(self):
+    def check_mask_coverage(self, ratio=False):
         masked_pixels = np.array([self._wfs[a, i].mask.sum() for a in range(
             self._wfs.shape[0]) for i in range(self._wfs.shape[1])])
+        titlestr = 'Number'
+        if(ratio == True):
+            masked_pixels = masked_pixels / \
+                (self._wfs.shape[2] * self._wfs.shape[3])
+            titlestr = 'Fraction'
         plt.figure()
         plt.clf()
         plt.ion()
         plt.plot(masked_pixels)
-        plt.ylabel('Number of Masked Pixels', size=25)
+
+        plt.ylabel(titlestr + ' of Masked Pixels', size=25)
         plt.xlabel('Measures', size=25)
         plt.title('Number of scans per actuator:%d' %
                   self._wfs.shape[1])
@@ -271,21 +283,120 @@ def main_calibration(wyko,
     return mcl, cplm, cpla
 
 
-# provata con il file cpl_all fatto il 28/2 che ti ho messo sulla chiavetta
-def provarec(cplm, cpla):
+def plot_interpolated_function(mcl):
+    plt.figure()
+    plt.clf()
+    for idx, act in enumerate(mcl._actuators_list):
+        a = np.min(mcl._deflection[act])
+        b = np.max(mcl._deflection[act])
+        xx = np.linspace(a, b, 1000)
+        plt.plot(mcl._finter[act](xx), xx, 'o-')
+
+
+def get_matrix_and_imask(cpla, mcl):
+    imask = reduce(lambda a, b: np.ma.mask_or(a, b), cpla._wfs[:, 13].mask)
+
+    def normalizeif(act):
+        return (cpla._wfs[act, 13][imask == False] / mcl._deflection[act, 13]).data
+
+    im = np.column_stack([normalizeif(i) for i in cpla._actuators_list])
+    rec = np.linalg.pinv(im)
+    return im, rec, imask
+
+
+def fit_this_mode(wyko, bmc, mode, cpla, mcl, im, rec, imask):
+
+    wf_mode = np.ma.array(data=mode, mask=imask)
+
+    def get_pos_from_wf(wfmap, mcl):
+
+        pos = np.dot(rec, wfmap[imask == False])
+        # check and clip cmds
+        for act, stroke in enumerate(pos):
+            if(stroke > max(mcl._deflection[act])):
+                pos[act] = max(mcl._deflection[act])
+                print('act%d reached max stroke' % act)
+            if(stroke < min(mcl._deflection[act])):
+                pos[act] = min(mcl._deflection[act])
+                print('act%d reached min stroke' % act)
+        return pos
+
+    pos_mode = get_pos_from_wf(wf_mode, mcl)
+
+    # expectations
+    wffitted = np.zeros((cpla._wfs.shape[2], cpla._wfs.shape[3]))
+    wffitted[imask == False] = np.dot(im, pos_mode)
+    wffitted = np.ma.array(data=wffitted, mask=imask)
+
+    plt.figure()
+    plt.clf()
+    plt.imshow(wf_mode)
+    plt.colorbar()
+    plt.title('Generated Mode', size=25)
+    plt.figure()
+    plt.clf()
+    plt.imshow(wffitted)
+    plt.colorbar()
+    plt.title('Fitted Mode', size=25)
+    plt.figure()
+    plt.clf()
+    plt.imshow(wffitted - wf_mode)
+    plt.colorbar()
+    plt.title('Mode difference', size=25)
+
+    print("Expectations:")
+    print("mode amplitude: %g nm rms " % wf_mode.std())
+    fitting_error = (wffitted - wf_mode).std()
+    print("fitting error: %g nm rms " % fitting_error)
+
+    # observed
+    #_get_zero_cmd_wavefront
+    cmd0 = np.zeros(bmc.get_number_of_actuators())
+    bmc.set_shape(cmd0)
+    wf0 = wyko.wavefront(1)
+    # set fitted cmd
+    cmd = np.zeros(bmc.get_number_of_actuators())
+    for act, stroke in enumerate(pos_mode):
+        cmd[act] = mcl.p2c(act, stroke)
+    bmc.set_shape(cmd)
+    #_get_wavefront_flat_subtracted
+    dd = wyko.wavefront(1) - wf0
+    measured_wf = dd - np.ma.median(dd)
+    plt.figure()
+    plt.clf()
+    plt.ion()
+    plt.imshow(measured_wf)
+    plt.colorbar()
+    plt.title('Observed Mode', size=25)
+
+    plt.figure()
+    plt.clf()
+    plt.ion()
+    plt.imshow(measured_wf - wffitted)
+    plt.colorbar()
+    plt.title('Difference Observed-Expected', size=25)
+
+    print("Observation:")
+
+    fitting_meas_error = (measured_wf - wffitted).std()
+    print("fitting error: %g nm rms " % fitting_meas_error)
+
+
+# da provare sul file cplm_all_fixed fatto il 17/3
+def provarec(cpla, mcl):
     # maschera intersezione di tutte le maschere delle wf map misurate
-    imask = reduce(lambda a, b: np.ma.mask_or(a, b), cplm._wfs[:, 7].mask)
+    imask = reduce(lambda a, b: np.ma.mask_or(a, b), cpla._wfs[:, 13].mask)
 
     # normalizzo la mappa di fase dell'attuatore act a max==1
-    # scelgo il comando 7: è una deformata di circa 500nm (quindi ben sopra al
+    # scelgo il comando 13: è una deformata di circa 500nm (quindi ben sopra al
     # rumore dell'interferometro)
     # e non troppo grossa da saturare l'interferometro: per tutti i 140
-    # attuatori la mappa del comando 7 non presenta "buchi"
+    # attuatori la mappa del comando 13 non presenta "buchi"
     #
     # la funzione ritorna un vettore contenente i valori del wf nei punti
     # dentro la maschera imask
     def normalizeif(act):
-        return (cplm._wfs[act, 7][imask == False] / cpla._max_deflection[act, 7]).data
+        return (cpla._wfs[act, 13][imask == False] / mcl._deflection[act, 13]).data
 
     # creo una "matrice di interazione" giustapponendo in colonna i vettori
     # normalizzati
@@ -311,7 +422,7 @@ def provarec(cplm, cpla):
 
     # wffitted è la mappa di fase che mi aspetto di ottenere davvero:
     # è il miglior fit che lo specchio riesce a fare di wftilt
-    wffitted = np.zeros((486, 640))
+    wffitted = np.zeros((cpla._wfs.shape[2], cpla._wfs.shape[3]))
     wffitted[imask == False] = np.dot(im, postilt)
     wffitted = np.ma.array(data=wffitted, mask=imask)
 
