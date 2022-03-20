@@ -290,99 +290,126 @@ def plot_interpolated_function(mcl):
         a = np.min(mcl._deflection[act])
         b = np.max(mcl._deflection[act])
         xx = np.linspace(a, b, 1000)
-        plt.plot(mcl._finter[act](xx), xx, 'o-')
-
-
-def get_matrix_and_imask(cpla, mcl):
-    imask = reduce(lambda a, b: np.ma.mask_or(a, b), cpla._wfs[:, 13].mask)
-
-    def normalizeif(act):
-        return (cpla._wfs[act, 13][imask == False] / mcl._deflection[act, 13]).data
-
-    im = np.column_stack([normalizeif(i) for i in cpla._actuators_list])
-    rec = np.linalg.pinv(im)
-    return im, rec, imask
-
-
-def fit_this_mode(wyko, bmc, mode, cpla, mcl, im, rec, imask):
-
-    wf_mode = np.ma.array(data=mode, mask=imask)
-
-    def get_pos_from_wf(wfmap, mcl):
-
-        pos = np.dot(rec, wfmap[imask == False])
-        # check and clip cmds
-        for act, stroke in enumerate(pos):
-            if(stroke > max(mcl._deflection[act])):
-                pos[act] = max(mcl._deflection[act])
-                print('act%d reached max stroke' % act)
-            if(stroke < min(mcl._deflection[act])):
-                pos[act] = min(mcl._deflection[act])
-                print('act%d reached min stroke' % act)
-        return pos
-
-    pos_mode = get_pos_from_wf(wf_mode, mcl)
-
-    # expectations
-    wffitted = np.zeros((cpla._wfs.shape[2], cpla._wfs.shape[3]))
-    wffitted[imask == False] = np.dot(im, pos_mode)
-    wffitted = np.ma.array(data=wffitted, mask=imask)
-
-    plt.figure()
-    plt.clf()
-    plt.imshow(wf_mode)
-    plt.colorbar()
-    plt.title('Generated Mode', size=25)
-    plt.figure()
-    plt.clf()
-    plt.imshow(wffitted)
-    plt.colorbar()
-    plt.title('Fitted Mode', size=25)
-    plt.figure()
-    plt.clf()
-    plt.imshow(wffitted - wf_mode)
-    plt.colorbar()
-    plt.title('Mode difference', size=25)
-
-    print("Expectations:")
-    print("mode amplitude: %g nm rms " % wf_mode.std())
-    fitting_error = (wffitted - wf_mode).std()
-    print("fitting error: %g nm rms " % fitting_error)
-
-    # observed
-    #_get_zero_cmd_wavefront
-    cmd0 = np.zeros(bmc.get_number_of_actuators())
-    bmc.set_shape(cmd0)
-    wf0 = wyko.wavefront(1)
-    # set fitted cmd
-    cmd = np.zeros(bmc.get_number_of_actuators())
-    for act, stroke in enumerate(pos_mode):
-        cmd[act] = mcl.p2c(act, stroke)
-    bmc.set_shape(cmd)
-    #_get_wavefront_flat_subtracted
-    dd = wyko.wavefront(1) - wf0
-    measured_wf = dd - np.ma.median(dd)
-    plt.figure()
-    plt.clf()
-    plt.ion()
-    plt.imshow(measured_wf)
-    plt.colorbar()
-    plt.title('Observed Mode', size=25)
-
-    plt.figure()
-    plt.clf()
-    plt.ion()
-    plt.imshow(measured_wf - wffitted)
-    plt.colorbar()
-    plt.title('Difference Observed-Expected', size=25)
-
-    print("Observation:")
-
-    fitting_meas_error = (measured_wf - wffitted).std()
-    print("fitting error: %g nm rms " % fitting_meas_error)
+        plt.plot(mcl._finter[act](xx), xx / 1.e-9, 'o-')
 
 
 # da provare sul file cplm_all_fixed fatto il 17/3
+
+class ModeGenerator():
+
+    NORM_AT_THIS_CMD = 13  # such that wyko noise and saturation are avoided
+
+    def __init__(self, cpla, mcl):
+        self._cpla = cpla
+        self._mcl = mcl
+
+    def build_intersection_mask(self):
+        self._imask = reduce(lambda a, b: np.ma.mask_or(
+            a, b), self._cpla._wfs[:, self.NORM_AT_THIS_CMD].mask)
+
+    def _normalize_influence_function(self, act):
+        return (self._cpla._wfs[act, self.NORM_AT_THIS_CMD][self._imask == False] / self._mcl._deflection[act, self.NORM_AT_THIS_CMD]).data
+
+    def build_interaction_matrix(self):
+        self._im = np.column_stack([self._normalize_influence_function(
+            act) for act in self._cpla._actuators_list])
+
+    def build_reconstruction_matrix(self):
+        self._rec = np.linalg.pinv(self._im)
+
+    def generate_mode(self, mode):
+        self._wfmode = np.ma.array(data=mode, mask=self._imask)
+
+    def generate_tilt(self):
+        self._wfmode = np.tile(np.linspace(-100e-9, 100e-9, 640), (486, 1))
+        self._wfmode = np.ma.array(data=self._wfmode, mask=self._imask)
+
+    def get_position_cmds_from_wf(self, wfmap=None):
+        if wfmap is None:
+            wfmap = self._wfmode
+        pos = np.dot(self._rec, wfmap[self._imask == False])
+        # check and clip cmds
+        for act, stroke in enumerate(pos):
+            max_stroke = np.max(self._mcl._deflection[act])
+            min_stroke = np.min(self._mcl._deflection[act])
+            if(stroke > max_stroke):
+                pos[act] = max_stroke
+                print('act%d reached max stroke' % act)
+            if(stroke < min_stroke):
+                pos[act] = min_stroke
+                print('act%d reached min stroke' % act)
+        return pos
+
+    def build_fitted_wavefront(self, wfmap=None):
+        if wfmap is None:
+            wfmap = self._wfmode
+        pos_from_wf = self.get_position_cmds_from_wf(wfmap)
+        self._wffitted = np.zeros(
+            (self._cpla._wfs.shape[2], self._cpla._wfs.shape[3]))
+        self._wffitted[self._imask == False] = np.dot(self._im, pos_from_wf)
+        self._wffitted = np.ma.array(data=self._wffitted, mask=self._imask)
+
+    def plot_generated_and_expected_WF(self):
+        plt.figure()
+        plt.clf()
+        plt.imshow(self._wfmode)
+        plt.colorbar()
+        plt.title('Generated Mode', size=25)
+        plt.figure()
+        plt.clf()
+        plt.imshow(self._wffitted)
+        plt.colorbar()
+        plt.title('Fitted Mode', size=25)
+        plt.figure()
+        plt.clf()
+        plt.imshow(self._wffitted - self._wfmode)
+        plt.colorbar()
+        plt.title('Mode difference', size=25)
+
+        print("Expectations:")
+        print("mode amplitude: %g nm rms " % self._wfmode.std())
+        fitting_error = (self._wffitted - self._wfmode).std()
+        print("fitting error: %g nm rms " % fitting_error)
+
+
+class ModeMeasurer():
+
+    def __init__(self, interferometer, mems_deformable_mirror):
+        self._interf = interferometer
+        self._bmc = mems_deformable_mirror
+
+    def execute_measure(self, pos, mcl):
+        flat_cmd = np.zeros(self._bmc.get_number_of_actuators())
+        self._bmc.set_shape(flat_cmd)
+        wfflat = self._interf.wavefront()
+
+        cmd = np.zeros(self._bmc.get_number_of_actuators())
+        for act, stroke in enumerate(pos):
+            cmd[act] = mcl.p2c(act, stroke)
+
+        self._bmc.set_shape(cmd)
+        #_get_wavefront_flat_subtracted
+        wfflatsub = self._interf.wavefront() - wfflat
+        self._wfmeas = wfflatsub - np.ma.median(wfflatsub)
+
+    def plot_expected_and_measured_mode(self, wffitted):
+        plt.figure()
+        plt.clf()
+        plt.ion()
+        plt.imshow(self._wfmeas)
+        plt.colorbar()
+        plt.title('Observed Mode', size=25)
+        plt.figure()
+        plt.clf()
+        plt.ion()
+        plt.imshow(self._wfmeas - wffitted)
+        plt.colorbar()
+        plt.title('Difference Observed-Expected', size=25)
+        print("Observation:")
+        fitting_meas_error = (self._wfmeas - wffitted).std()
+        print("fitting error: %g nm rms " % fitting_meas_error)
+
+
 def provarec(cpla, mcl):
     # maschera intersezione di tutte le maschere delle wf map misurate
     imask = reduce(lambda a, b: np.ma.mask_or(a, b), cpla._wfs[:, 13].mask)
