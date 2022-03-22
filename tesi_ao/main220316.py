@@ -6,6 +6,7 @@ from astropy.io import fits
 from scipy.interpolate.interpolate import interp1d
 from functools import reduce
 import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
 
 
 def create_devices():
@@ -149,31 +150,43 @@ class CommandToPositionLinearizationAnalyzer(object):
         self._reference_shape_tag = res['reference_shape_tag']
         self._n_steps_voltage_scan = self._wfs.shape[1]
 
-    def _max_wavefront(self, act_idx, cmd_index):
-        wf = self._wfs[act_idx, cmd_index]
-        coord_max = np.argwhere(np.abs(wf) == np.max(np.abs(wf)))[0]
-        return wf[coord_max[0], coord_max[1]]
+    # def _max_wavefront(self, act_idx, cmd_index):
+    #     wf = self._wfs[act_idx, cmd_index]
+    #     coord_max = np.argwhere(np.abs(wf) == np.max(np.abs(wf)))[0]
+    #     return wf[coord_max[0], coord_max[1]]
 
-    def _max_roi_wavefront(self, act_idx, cmd_index):
-        wf = self._wfs[act_idx, cmd_index]
-        b, t, l, r = self._get_max_roi(act_idx)
-        wfroi = wf[b:t, l:r]
-        print('act%d done!' % act_idx)
-        coord_max = np.argwhere(
-            np.abs(wfroi) == np.max(np.abs(wfroi)))[0]
-        return wfroi[coord_max[0], coord_max[1]]
+    # def _max_roi_wavefront(self, act_idx, cmd_index):
+    #     wf = self._wfs[act_idx, cmd_index]
+    #     b, t, l, r = self._get_max_roi(act_idx)
+    #     wfroi = wf[b:t, l:r]
+    #     print('act%d done!' % act_idx)
+    #     coord_max = np.argwhere(
+    #         np.abs(wfroi) == np.max(np.abs(wfroi)))[0]
+    #     return wfroi[coord_max[0], coord_max[1]]
+    #
+    # def _get_max_roi(self, act):
+    #     roi_size = 50
+    #     wf = self._wfs[act, 0]
+    #     coord_max = np.argwhere(np.abs(wf) == np.max(np.abs(wf)))[0]
+    #     return coord_max[0] - roi_size, coord_max[0] + roi_size, \
+    #         coord_max[1] - roi_size, coord_max[1] + roi_size
 
-    def _get_max_roi(self, act):
-        roi_size = 50
-        wf = self._wfs[act, 0]
+    def _get_max_pixel(self, act):
+        wf = self._wfs[act, 2]
         coord_max = np.argwhere(np.abs(wf) == np.max(np.abs(wf)))[0]
-        return coord_max[0] - roi_size, coord_max[0] + roi_size, \
-            coord_max[1] - roi_size, coord_max[1] + roi_size
+        return coord_max[0], coord_max[1]
+
+    def _max_wavefront(self, act, cmd_index):
+        wf = self._wfs[act, cmd_index]
+        y, x = self._get_max_pixel(act)
+        return wf[y, x]
 
     def _max_vector(self, act_idx):
+        print('act%d' % act_idx)
         res = np.zeros(self._n_steps_voltage_scan)
         for i in range(self._n_steps_voltage_scan):
-            res[i] = self._max_roi_wavefront(act_idx, i)
+            print('cmd step%d' % i)
+            res[i] = self._max_wavefront(act_idx, i)
         return res
 
     def _compute_maximum_deflection(self):
@@ -210,6 +223,72 @@ class CommandToPositionLinearizationAnalyzer(object):
         plt.xlabel('Measures', size=25)
         plt.title('Number of scans per actuator:%d' %
                   self._wfs.shape[1])
+
+    # def _2dgaussian(self, X, amplitude, x0, y0, sigmax, sigmay, offset):
+    #     y, x = X
+    #     z = np.zeros((len(y), len(x)), dtype='float')
+    #     N = amplitude  # *0.5 / (np.pi * sigmax * sigmay)
+    #     for xi in np.arange(len(x)):
+    #         a = 0.5 * ((xi - x0) / sigmax)**2
+    #         for yi in np.arange(len(y)):
+    #             b = 0.5 * ((yi - y0) / sigmay)**2
+    #
+    #             z[yi, xi] = N * np.exp(-(a + b)) + offset
+    #     return z.ravel()
+    #
+    # def _gaussian_fitting(self, act_idx, cmd_index):
+    #     wf = self._wfs[act_idx, cmd_index]
+    #     b, t, l, r = self._get_max_roi(act_idx)
+    #     wfroi = wf[b:t, l:r]
+    #     z = wfroi
+    #     x = np.arange(wfroi.shape[1], dtype='float')
+    #     y = np.arange(wfroi.shape[0], dtype='float')
+    #
+    #     A0 = self._max_roi_wavefront(act_idx, cmd_index)
+    #     coord_max = np.argwhere(np.abs(wfroi) == np.max(np.abs(wfroi)))[0]
+    #     x0 = coord_max[1]
+    #     y0 = coord_max[0]
+    #     sigma0 = 25.
+    #     sigmax = sigma0
+    #     sigmay = sigma0
+    #     offset = 0.
+    #     starting_values = [A0, x0, y0, sigmax, sigmay, offset]
+    #     X = y, x
+    #
+    #     Z = np.zeros((len(y), len(x)), dtype='float')
+    #     for j in np.arange(len(y)):
+    #         prova = z[j].compressed()
+    #         Z[j] = prova
+    #
+    #     #err_z = Z.std() * np.ones(len(x) * len(y))
+    #
+    #     fpar, fcov = curve_fit(self._2dgaussian, X,
+    #                            Z.ravel(), p0=starting_values, absolute_sigma=True)
+    #     #err_fpar = np.sqrt(np.diag(fcov))
+    #     error = (Z.ravel() - self._2dgaussian(X, *fpar))
+    #     starting_values = [fpar[0], fpar[1],
+    #                        fpar[2], fpar[3], fpar[4], fpar[5]]
+    #     fpar, fcov = curve_fit(self._2dgaussian, X,
+    #                            Z.ravel(), p0=starting_values, sigma=error, absolute_sigma=True)
+    #
+    #     return fpar[0]
+    #
+    # def _compute_gaussian_amplitude_deflection(self):
+    #     self._max_deflection = np.zeros(
+    #         (self._cmd_vector.shape[0], self._cmd_vector.shape[1]))
+    #     for act in range(self._cmd_vector.shape[0]):
+    #         for cmd_idx in range(self._cmd_vector.shape[1]):
+    #             self._max_deflection[act, cmd_idx] = self._gaussian_fitting(
+    #                 act, cmd_idx)
+    #
+    # def compute_gaussian_linearization(self):
+    #     self._compute_gaussian_amplitude_deflection()
+    #
+    #     return MemsCommandLinearization(
+    #         self._actuators_list,
+    #         self._cmd_vector,
+    #         self._max_deflection,
+    #         self._reference_shape_tag)
 
 
 class MemsCommandLinearization():
@@ -290,7 +369,38 @@ def plot_interpolated_function(mcl):
         a = np.min(mcl._deflection[act])
         b = np.max(mcl._deflection[act])
         xx = np.linspace(a, b, 1000)
-        plt.plot(mcl._finter[act](xx), xx / 1.e-9, 'o-')
+        plt.plot(mcl._finter[act](xx), xx / 1.e-9, '.-')
+    plt.xlabel('Command [au]', size=25)
+    plt.ylabel('Deflection [nm]', size=25)
+    plt.title('Calibration curve per actuator', size=25)
+    plt.grid()
+
+
+def plot_acquired_measures(mcl):
+    plt.figure()
+    plt.clf()
+    for idx, act in enumerate(mcl._actuators_list):
+        plt.plot(mcl._cmd_vector[idx], mcl._deflection[idx] / 1.e-9, '.-')
+    plt.xlabel('Command [au]', size=25)
+    plt.ylabel('Deflection [nm]', size=25)
+    plt.title('Acquired Measures per actuator', size=25)
+    plt.grid()
+
+
+def plot_single_curve(mcl, act):
+    plt.figure()
+    plt.clf()
+    a = np.min(mcl._deflection[act])
+    b = np.max(mcl._deflection[act])
+    xx = np.linspace(a, b, 1000)
+    plt.plot(mcl._cmd_vector[act], mcl._deflection[act] /
+             1.e-9, 'or', label='sampling points')
+    plt.plot(mcl._finter[act](xx), xx / 1.e-9, '-', label='finter')
+    plt.title('Calibration Curve: act#%d' % act, size=25)
+    plt.xlabel('Commands [au]', size=25)
+    plt.ylabel('Deflection [nm]', size=25)
+    plt.grid()
+    plt.legend(loc='best')
 
 
 # da provare sul file cplm_all_fixed fatto il 17/3
@@ -367,9 +477,9 @@ class ModeGenerator():
         plt.title('Mode difference', size=25)
 
         print("Expectations:")
-        print("mode amplitude: %g nm rms " % self._wfmode.std())
+        print("mode amplitude: %g m rms " % self._wfmode.std())
         fitting_error = (self._wffitted - self._wfmode).std()
-        print("fitting error: %g nm rms " % fitting_error)
+        print("fitting error: %g m rms " % fitting_error)
 
 
 class ModeMeasurer():
@@ -384,7 +494,7 @@ class ModeMeasurer():
         wfflat = self._interf.wavefront()
 
         cmd = np.zeros(self._bmc.get_number_of_actuators())
-        for act, stroke in enumerate(pos):
+        for act, stroke in enumerate(pos.data):
             cmd[act] = mcl.p2c(act, stroke)
 
         self._bmc.set_shape(cmd)
@@ -406,7 +516,11 @@ class ModeMeasurer():
         plt.colorbar()
         plt.title('Difference Observed-Expected', size=25)
         print("Observation:")
+        amp_mode = self._wfmeas.std()
+        amp_mode = amp_mode / 1.e-9
+        print("mode amplitude: %g nm rms " % amp_mode)
         fitting_meas_error = (self._wfmeas - wffitted).std()
+        fitting_meas_error = fitting_meas_error / 1.e-9
         print("fitting error: %g nm rms " % fitting_meas_error)
 
 
