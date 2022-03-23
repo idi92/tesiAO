@@ -481,6 +481,12 @@ class ModeGenerator():
         fitting_error = (self._wffitted - self._wfmode).std()
         print("fitting error: %g m rms " % fitting_error)
 
+    def vector_to_map(self, wf_vector):
+        mappa = np.zeros(
+            (self._cpla._wfs.shape[2], self._cpla._wfs.shape[3]))
+        mappa[self._imask == False] = wf_vector
+        return np.ma.array(data=mappa, mask=self._imask)
+
 
 class ModeMeasurer():
 
@@ -587,3 +593,47 @@ def provarec(cpla, mcl):
 
     print("mode amplitude sin: %g nm rms " % wfsin.std())
     print("fitting error: %g nm rms " % fitting_error_sin)
+
+
+class TestSvd():
+
+    def __init__(self, mg):
+        self.mg = mg
+        # mg = ModeGenerator
+        self.u, self.s, self.vh = np.linalg.svd(
+            self.mg._im, full_matrices=False)
+
+    def autovettori(self, eigenvalue_index):
+        wf = np.zeros((486, 640))
+        wf[self.mg._imask == False] = np.dot(
+            self.mg._im, self.vh.T[:, eigenvalue_index])
+        return np.ma.array(wf, mask=self.mg._imask)
+
+    def rec(self, eigenvalue_to_use):
+        large = np.zeros(self.s.shape).astype(bool)
+        large[eigenvalue_to_use] = True
+        s = np.divide(1, self.s, where=large)
+        s[~large] = 0
+        res = np.matmul(np.transpose(self.vt), np.multiply(
+            s[..., np.newaxis], np.transpose(self.u)))
+        return res
+
+    def animate(self, interval=100):
+        import numpy as np
+        import matplotlib.pyplot as plt
+        import matplotlib.animation as animation
+
+        fig = plt.figure()
+
+        self._ani_index = 0
+        im = plt.imshow(self.autovettori(0), animated=True)
+
+        def updatefig(*args):
+            self._ani_index += 1
+            im.set_array(self.autovettori(self._ani_index % 140))
+            plt.title("Eigenmode %d" % self._ani_index)
+            return im,
+
+        self._ani = animation.FuncAnimation(
+            fig, updatefig, interval=interval, blit=True)
+        plt.show()
