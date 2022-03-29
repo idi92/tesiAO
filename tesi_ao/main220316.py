@@ -413,19 +413,56 @@ class ModeGenerator():
         self._cpla = cpla
         self._mcl = mcl
 
-    def build_intersection_mask(self):
+    def _build_intersection_mask(self):
         self._imask = reduce(lambda a, b: np.ma.mask_or(
             a, b), self._cpla._wfs[:, self.NORM_AT_THIS_CMD].mask)
+
+    def _build_circular_imask(self):
+        self._Circular_imask = self._imask
+        # center pixel coord of the full map
+        central_ypix = self._imask.shape[0] // 2
+        central_xpix = self._imask.shape[1] // 2
+        HeightInPixels = (self._imask[:, central_xpix] == False).sum()
+        BaseInPixels = (self._imask[central_ypix, :] == False).sum()
+
+        offsetX = (self._imask[central_ypix,
+                               0:self._imask.shape[1] // 2] == True).sum()
+        offsetY = (self._imask[0:self._imask.shape[0] //
+                               2, central_xpix] == True).sum()
+        # center of False map and origin of circular mask in pixel
+        yc0 = offsetY + HeightInPixels // 2
+        xc0 = offsetX + BaseInPixels // 2
+        RadiusInPixels = min(BaseInPixels, HeightInPixels) // 2
+        for j in range(self._imask.shape[0]):
+            for i in range(self._imask.shape[1]):
+                Distanceinpixels = np.sqrt(
+                    (j - yc0)**2 + (i - xc0)**2)
+                if(Distanceinpixels <= RadiusInPixels):
+                    self._Circular_imask[j, i] = False
+                else:
+                    self._Circular_imask[j, i] = True
 
     def _normalize_influence_function(self, act):
         return (self._cpla._wfs[act, self.NORM_AT_THIS_CMD][self._imask == False] / self._mcl._deflection[act, self.NORM_AT_THIS_CMD]).data
 
-    def build_interaction_matrix(self):
+    def _build_interaction_matrix(self):
         self._im = np.column_stack([self._normalize_influence_function(
             act) for act in self._cpla._actuators_list])
 
-    def build_reconstruction_matrix(self):
+    def _build_reconstruction_matrix(self):
         self._rec = np.linalg.pinv(self._im)
+
+    def build_i_instances(self):
+        self._build_intersection_mask()
+        self._build_interaction_matrix()
+        self._build_reconstruction_matrix()
+
+    def build_instances_with_Circular_imask(self):
+        self._build_intersection_mask()
+        self._build_circular_imask()
+        self._imask = self._Circular_imask
+        self._build_interaction_matrix()
+        self._build_reconstruction_matrix()
 
     def generate_mode(self, mode):
         self._wfmode = np.ma.array(data=mode, mask=self._imask)
@@ -614,7 +651,7 @@ class TestSvd():
         large[eigenvalue_to_use] = True
         s = np.divide(1, self.s, where=large)
         s[~large] = 0
-        res = np.matmul(np.transpose(self.vt), np.multiply(
+        res = np.matmul(np.transpose(self.vh), np.multiply(
             s[..., np.newaxis], np.transpose(self.u)))
         return res
 
