@@ -7,6 +7,8 @@ from scipy.interpolate.interpolate import interp1d
 from functools import reduce
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
+from numpy import dtype
+from arte.types.mask import CircularMask
 
 
 def create_devices():
@@ -164,12 +166,12 @@ class CommandToPositionLinearizationAnalyzer(object):
     #         np.abs(wfroi) == np.max(np.abs(wfroi)))[0]
     #     return wfroi[coord_max[0], coord_max[1]]
     #
-    # def _get_max_roi(self, act):
-    #     roi_size = 50
-    #     wf = self._wfs[act, 0]
-    #     coord_max = np.argwhere(np.abs(wf) == np.max(np.abs(wf)))[0]
-    #     return coord_max[0] - roi_size, coord_max[0] + roi_size, \
-    #         coord_max[1] - roi_size, coord_max[1] + roi_size
+    def _get_max_roi(self, act):
+        roi_size = 50
+        wf = self._wfs[act, 0]
+        coord_max = self._get_max_pixel(act)
+        return coord_max[0] - roi_size, coord_max[0] + roi_size, \
+            coord_max[1] - roi_size, coord_max[1] + roi_size
 
     def _get_max_pixel(self, act):
         wf = self._wfs[act, 2]
@@ -179,7 +181,15 @@ class CommandToPositionLinearizationAnalyzer(object):
     def _max_wavefront(self, act, cmd_index):
         wf = self._wfs[act, cmd_index]
         y, x = self._get_max_pixel(act)
-        return wf[y, x]
+        list_to_avarage = []
+        # avoid masked data
+        for yi in range(y - 1, y + 2):
+            for xi in range(x - 1, x + 2):
+                if(wf[yi, xi].data != 0.):
+                    list_to_avarage.append(wf[yi, xi])
+        list_to_avarage = np.array(list_to_avarage)
+        # return wf[y, x]
+        return np.median(list_to_avarage)
 
     def _max_vector(self, act_idx):
         print('act%d' % act_idx)
@@ -238,16 +248,34 @@ class CommandToPositionLinearizationAnalyzer(object):
     #
     # def _gaussian_fitting(self, act_idx, cmd_index):
     #     wf = self._wfs[act_idx, cmd_index]
+    #     wf2 = self._wfs[act_idx, 2]
     #     b, t, l, r = self._get_max_roi(act_idx)
     #     wfroi = wf[b:t, l:r]
-    #     z = wfroi
-    #     x = np.arange(wfroi.shape[1], dtype='float')
-    #     y = np.arange(wfroi.shape[0], dtype='float')
-    #
-    #     A0 = self._max_roi_wavefront(act_idx, cmd_index)
-    #     coord_max = np.argwhere(np.abs(wfroi) == np.max(np.abs(wfroi)))[0]
+    #     wfroi2 = wf2[b:t, l:r]
+    #     coord_max = np.argwhere(np.abs(wfroi2) == np.max(np.abs(wfroi2)))[0]
     #     x0 = coord_max[1]
     #     y0 = coord_max[0]
+    #     #z = wfroi[wfroi.data != 0.]
+    #
+    #     #z = wfroi
+    #
+    #     NvalidX = (wfroi.mask[y0, :] == False).sum()
+    #     NvalidY = (wfroi.mask[:, x0] == False).sum()
+    #     x = np.arange(NvalidX, dtype='float')
+    #     y = np.arange(NvalidY, dtype='float')
+    #
+    #     Z = []
+    #     for yi in range(wfroi.shape[0]):
+    #         for xi in range(wfroi.shape[1]):
+    #             if(wfroi[yi, xi].data != 0.):
+    #                 Z.append(wfroi[yi, xi])
+    #
+    #     Z = np.array(Z, dtype='float')
+    #
+    #     Z = wfroi.compressed()
+    #
+    #     A0 = self._max_wavefront(act_idx, cmd_index)
+    #
     #     sigma0 = 25.
     #     sigmax = sigma0
     #     sigmay = sigma0
@@ -255,22 +283,18 @@ class CommandToPositionLinearizationAnalyzer(object):
     #     starting_values = [A0, x0, y0, sigmax, sigmay, offset]
     #     X = y, x
     #
-    #     Z = np.zeros((len(y), len(x)), dtype='float')
-    #     for j in np.arange(len(y)):
-    #         prova = z[j].compressed()
-    #         Z[j] = prova
-    #
     #     #err_z = Z.std() * np.ones(len(x) * len(y))
     #
-    #     fpar, fcov = curve_fit(self._2dgaussian, X,
-    #                            Z.ravel(), p0=starting_values, absolute_sigma=True)
+    #     fpar, fcov = curve_fit(self._2dgaussian, X, Z,
+    #                            p0=starting_values, absolute_sigma=True)
     #     #err_fpar = np.sqrt(np.diag(fcov))
-    #     error = (Z.ravel() - self._2dgaussian(X, *fpar))
+    #     print('1curve_fit done')
+    #     error = (Z - self._2dgaussian(X, *fpar))
     #     starting_values = [fpar[0], fpar[1],
     #                        fpar[2], fpar[3], fpar[4], fpar[5]]
-    #     fpar, fcov = curve_fit(self._2dgaussian, X,
-    #                            Z.ravel(), p0=starting_values, sigma=error, absolute_sigma=True)
-    #
+    #     fpar, fcov = curve_fit(
+    #         self._2dgaussian, X, Z, p0=starting_values, sigma=error, absolute_sigma=True)
+    #     print('2curve_fit done')
     #     return fpar[0]
     #
     # def _compute_gaussian_amplitude_deflection(self):
@@ -412,13 +436,48 @@ class ModeGenerator():
     def __init__(self, cpla, mcl):
         self._cpla = cpla
         self._mcl = mcl
+        self._n_of_act = self._cpla._wfs.shape[0]
+        self._build_intersection_mask()
 
     def _build_intersection_mask(self):
         self._imask = reduce(lambda a, b: np.ma.mask_or(
             a, b), self._cpla._wfs[:, self.NORM_AT_THIS_CMD].mask)
 
-    def _build_circular_imask(self):
-        self._Circular_imask = self._imask
+    def _check_actuators_visibility(self, cmd=None):
+        if cmd is None:
+            self._cmd_for_visibility = self.NORM_AT_THIS_CMD
+        self._rms_wf = np.zeros(self._n_of_act)
+        for act in range(self._n_of_act):
+            self._rms_wf[act] = np.ma.array(data=self._cpla._wfs[act, self._cmd_for_visibility],
+                                            mask=self._pupil_mask).std()
+
+    def _show_actuators_visibility(self):
+        plt.figure()
+        plt.clf()
+        plt.ion()
+        plt.plot(self._rms_wf / 1.e-9, 'o', label='cmd=%d' %
+                 self._cmd_for_visibility)
+        plt.xlabel('#Nactuator', size=25)
+        plt.ylabel('Wavefront rms [nm]', size=25)
+        plt.grid()
+        plt.legend(loc='best')
+
+    def _build_valid_actuators_list(self, cmd=None):
+        THRESHOLD_RMS = 0.5
+        self._check_actuators_visibility(cmd)
+        self._acts_in_pupil = np.where(
+            self._rms_wf > THRESHOLD_RMS * self._rms_wf.max())[0]
+
+    def create_circular_mask(self, radius, center):
+        mask = CircularMask(self._imask.shape,
+                            maskRadius=radius, maskCenter=center)
+        return mask.mask()
+
+    def create_centered_circular_mask(self):
+        '''
+        centered wrt the intersection mask
+        '''
+        circular_imask = self._imask
         # center pixel coord of the full map
         central_ypix = self._imask.shape[0] // 2
         central_xpix = self._imask.shape[1] // 2
@@ -438,12 +497,14 @@ class ModeGenerator():
                 Distanceinpixels = np.sqrt(
                     (j - yc0)**2 + (i - xc0)**2)
                 if(Distanceinpixels <= RadiusInPixels):
-                    self._Circular_imask[j, i] = False
+                    circular_imask[j, i] = False
                 else:
-                    self._Circular_imask[j, i] = True
+                    circular_imask[j, i] = True
+        return circular_imask
 
     def _normalize_influence_function(self, act):
-        return (self._cpla._wfs[act, self.NORM_AT_THIS_CMD][self._imask == False] / self._mcl._deflection[act, self.NORM_AT_THIS_CMD]).data
+        return (self._cpla._wfs[act, self.NORM_AT_THIS_CMD][self._pupil_mask == False] /
+                self._mcl._deflection[act, self.NORM_AT_THIS_CMD]).data
 
     def _build_interaction_matrix(self):
         self._im = np.column_stack([self._normalize_influence_function(
@@ -452,29 +513,39 @@ class ModeGenerator():
     def _build_reconstruction_matrix(self):
         self._rec = np.linalg.pinv(self._im)
 
+    def compute_reconstructor(self, mask=None):
+        # TODO: check that mask.shape is equal to self._imask.shape
+        self._pupil_mask = np.ma.mask_or(self._imask, mask)
+        self._build_valid_actuators_list()
+        self._build_interaction_matrix()
+
     def build_i_instances(self):
-        self._build_intersection_mask()
         self._build_interaction_matrix()
         self._build_reconstruction_matrix()
 
     def build_instances_with_Circular_imask(self):
-        self._build_intersection_mask()
         self._build_circular_imask()
         self._imask = self._Circular_imask
         self._build_interaction_matrix()
         self._build_reconstruction_matrix()
 
-    def generate_mode(self, mode):
-        self._wfmode = np.ma.array(data=mode, mask=self._imask)
+    def _BuildInteractionMatrixInCircularPupil(self, cmd):
+        self._chosen_act_list = self._get_clear_actuators_for_IF(cmd)
+
+        self._im = np.column_stack([self._normalize_influence_function(
+            act) for act in self._chosen_act_list])
+
+    def generate_mode(self, wfmap):
+        self._wfmode = np.ma.array(data=wfmap, mask=self._pupil_mask)
 
     def generate_tilt(self):
         self._wfmode = np.tile(np.linspace(-100e-9, 100e-9, 640), (486, 1))
-        self._wfmode = np.ma.array(data=self._wfmode, mask=self._imask)
+        self._wfmode = np.ma.array(data=self._wfmode, mask=self._pupil_mask)
 
     def get_position_cmds_from_wf(self, wfmap=None):
         if wfmap is None:
             wfmap = self._wfmode
-        pos = np.dot(self._rec, wfmap[self._imask == False])
+        pos = np.dot(self._rec, wfmap[self._pupil_mask == False])
         # check and clip cmds
         for act, stroke in enumerate(pos):
             max_stroke = np.max(self._mcl._deflection[act])
@@ -493,8 +564,10 @@ class ModeGenerator():
         pos_from_wf = self.get_position_cmds_from_wf(wfmap)
         self._wffitted = np.zeros(
             (self._cpla._wfs.shape[2], self._cpla._wfs.shape[3]))
-        self._wffitted[self._imask == False] = np.dot(self._im, pos_from_wf)
-        self._wffitted = np.ma.array(data=self._wffitted, mask=self._imask)
+        self._wffitted[self._pupil_mask == False] = np.dot(
+            self._im, pos_from_wf)
+        self._wffitted = np.ma.array(
+            data=self._wffitted, mask=self._pupil_mask)
 
     def plot_generated_and_expected_WF(self):
         plt.figure()
@@ -521,8 +594,8 @@ class ModeGenerator():
     def vector_to_map(self, wf_vector):
         mappa = np.zeros(
             (self._cpla._wfs.shape[2], self._cpla._wfs.shape[3]))
-        mappa[self._imask == False] = wf_vector
-        return np.ma.array(data=mappa, mask=self._imask)
+        mappa[self._pupil_mask == False] = wf_vector
+        return np.ma.array(data=mappa, mask=self._pupil_mask)
 
 
 class ModeMeasurer():
@@ -531,7 +604,9 @@ class ModeMeasurer():
         self._interf = interferometer
         self._bmc = mems_deformable_mirror
 
-    def execute_measure(self, pos, mcl):
+    def execute_measure(self, mcl, mg, pos=None):
+        if pos is None:
+            pos = mg.get_position_cmds_from_wf()
         flat_cmd = np.zeros(self._bmc.get_number_of_actuators())
         self._bmc.set_shape(flat_cmd)
         wfflat = self._interf.wavefront()
@@ -544,6 +619,7 @@ class ModeMeasurer():
         #_get_wavefront_flat_subtracted
         wfflatsub = self._interf.wavefront() - wfflat
         self._wfmeas = wfflatsub - np.ma.median(wfflatsub)
+        self._wfmeas = np.ma.array(data=self._wfmeas, mask=mg._imask)
 
     def plot_expected_and_measured_mode(self, wffitted):
         plt.figure()
@@ -674,3 +750,166 @@ class TestSvd():
         self._ani = animation.FuncAnimation(
             fig, updatefig, interval=interval, blit=True)
         plt.show()
+
+
+class InfluenceFunctionMeasurer():
+    NUMBER_STEPS_VOLTAGE_SCAN = 1
+    NUMBER_WAVEFRONTS_TO_AVERAGE = 1
+
+    def __init__(self, interferometer, mems_deformable_mirror):
+        self._interf = interferometer
+        self._bmc = mems_deformable_mirror
+        self._n_acts = self._bmc.get_number_of_actuators()
+        self._wfflat = None
+
+    def _get_zero_command_wavefront(self):
+        if self._wfflat is None:
+            cmd = np.zeros(self._n_acts)
+            self._bmc.set_shape(cmd)
+            self._wfflat = self._interf.wavefront(
+                self.NUMBER_WAVEFRONTS_TO_AVERAGE)
+        return self._wfflat
+
+    def PrintCommonUnitCommandInterval(self, mcl):
+        MaxUnitCommand = np.min(mcl._deflection[:, 0])
+        MinUnitCommand = np.max(mcl._deflection[:, -1])
+        print(
+            'Select Unit deflection in the following interval:[%g,' % MinUnitCommand + ' %g] Meters' % MaxUnitCommand)
+
+    def execute_unit_command_scan(self, mcl, UnitCmdInMeters=None, act_list=None):
+        if UnitCmdInMeters is None:
+            UnitCmdInMeters = 200.e-9
+        if act_list is None:
+            act_list = np.arange(self._n_acts)
+
+        self._actuators_list = np.array(act_list)
+        n_acts_to_meas = len(self._actuators_list)
+
+        wfflat = self._get_zero_command_wavefront()
+
+        self._reference_cmds = self._bmc.get_reference_shape()
+        self._reference_tag = self._bmc.get_reference_shape_tag()
+
+        self._cmd_vector = np.zeros((n_acts_to_meas,
+                                     self.NUMBER_STEPS_VOLTAGE_SCAN))
+
+        self._wfs = np.ma.zeros(
+            (n_acts_to_meas, self.NUMBER_STEPS_VOLTAGE_SCAN,
+             wfflat.shape[0], wfflat.shape[1]))
+
+        N_pixels = self._wfs.shape[2] * self._wfs.shape[3]
+        for act_idx, act in enumerate(self._actuators_list):
+            self._cmd_vector[act_idx] = mcl.p2c(act, UnitCmdInMeters)
+            for cmd_idx, cmdi in enumerate(self._cmd_vector[act_idx]):
+                print("Act:%d - command %g" % (act, cmdi))
+                cmd = np.zeros(self._n_acts)
+                cmd[act] = cmdi
+                self._bmc.set_shape(cmd)
+                self._wfs[act_idx, cmd_idx, :,
+                          :] = self._get_wavefront_flat_subtracted()
+                masked_pixels = self._wfs[act_idx, cmd_idx].mask.sum()
+                masked_ratio = masked_pixels / N_pixels
+                if masked_ratio > 0.7829:
+                    print('Warning: Bad measure acquired for: act%d' %
+                          act_idx + ' cmd_idx %d' % cmd_idx)
+                    self._avoid_saturated_measures(
+                        masked_ratio, act_idx, cmd_idx, N_pixels)
+
+    def _avoid_saturated_measures(self, masked_ratio, act_idx, cmd_idx, N_pixels):
+
+        while masked_ratio > 0.7829:
+            self._wfs[act_idx, cmd_idx, :,
+                      :] = self._get_wavefront_flat_subtracted()
+            masked_pixels = self._wfs[act_idx, cmd_idx].mask.sum()
+            masked_ratio = masked_pixels / N_pixels
+
+        print('Repeated measure completed!')
+
+    def _get_wavefront_flat_subtracted(self):
+        dd = self._interf.wavefront(
+            self.NUMBER_WAVEFRONTS_TO_AVERAGE) - self._get_zero_command_wavefront()
+        return dd - np.ma.median(dd)
+
+    def _reset_flat_wavefront(self):
+        self._wfflat = None
+
+    def check_mask_coverage(self, ratio=False):
+        masked_pixels = np.array([self._wfs[a, i].mask.sum() for a in range(
+            self._wfs.shape[0]) for i in range(self._wfs.shape[1])])
+        titlestr = 'Number'
+        if(ratio == True):
+            masked_pixels = masked_pixels / \
+                (self._wfs.shape[2] * self._wfs.shape[3])
+            titlestr = 'Fraction'
+        plt.figure()
+        plt.clf()
+        plt.ion()
+        plt.plot(masked_pixels)
+
+        plt.ylabel(titlestr + ' of Masked Pixels', size=25)
+        plt.xlabel('Measures', size=25)
+        plt.title('Number of scans per actuator:%d' %
+                  self._wfs.shape[1])
+
+    def save_results(self, fname):
+        hdr = fits.Header()
+        hdr['REF_TAG'] = self._reference_tag
+        hdr['N_AV_FR'] = self.NUMBER_WAVEFRONTS_TO_AVERAGE
+        fits.writeto(fname, self._wfs.data, hdr)
+        fits.append(fname, self._wfs.mask.astype(int))
+        fits.append(fname, self._cmd_vector)
+        fits.append(fname, self._actuators_list)
+        fits.append(fname, self._reference_cmds)
+
+    @staticmethod
+    def load(fname):
+        header = fits.getheader(fname)
+        hduList = fits.open(fname)
+        wfs_data = hduList[0].data
+        wfs_mask = hduList[1].data.astype(bool)
+        wfs = np.ma.masked_array(data=wfs_data, mask=wfs_mask)
+        cmd_vector = hduList[2].data
+        actuators_list = hduList[3].data
+        reference_commands = hduList[4].data
+        return {'wfs': wfs,
+                'cmd_vector': cmd_vector,
+                'actuators_list': actuators_list,
+                'reference_shape': reference_commands,
+                'reference_shape_tag': header['REF_TAG']
+                }
+
+
+class PitchMeasurer():
+    # Mems product info
+    DefaultPitchInMeters = 450.e-6
+    DefaultApertureInMeters = 4.95e-3
+    DistanceInPitch = 7
+    NactInDistanceInPitch = DistanceInPitch + 1
+    NactsInLine = 12
+
+    def __init__(self, cpla):
+        self._cpla = cpla
+        self._n_of_act = self._cpla._wfs.shape[0]
+
+    def _get_pixel_distance_between_peaks(self, act1, act2):
+        y1, x1 = self._cpla._get_max_pixel(act1)
+        y2, x2 = self._cpla._get_max_pixel(act2)
+        return np.sqrt((y2 - y1) * (y2 - y1) + (x2 - x1) * (x2 - x1))
+
+    def get_pixel_distance_alongX(self):
+        act1 = np.arange(24, 31 + 1)
+        act2 = np.arange(108, 115 + 1)
+        pixdist = np.zeros(self.NactInDistanceInPitch)
+        for i in range(self.NactInDistanceInPitch):
+            pixdist[i] = self._get_pixel_distance_between_peaks(
+                act1[i], act2[i])
+        return pixdist
+
+    def get_pixel_distance_alongY(self):
+        act1 = np.arange(31, 127, self.NactsInLine)
+        act2 = np.arange(24, 120, self.NactsInLine)
+        pixdist = np.zeros(self.NactInDistanceInPitch)
+        for i in range(self.NactInDistanceInPitch):
+            pixdist[i] = self._get_pixel_distance_between_peaks(
+                act1[i], act2[i])
+        return pixdist
