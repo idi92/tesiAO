@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 from numpy import dtype
 from arte.types.mask import CircularMask
+from arte.utils.zernike_generator import ZernikeGenerator
 
 
 def create_devices():
@@ -427,11 +428,52 @@ def plot_single_curve(mcl, act):
     plt.legend(loc='best')
 
 
+class PupilMaskBuilder():
+
+    def __init__(self, wfmask):
+        self._wfmask = wfmask
+
+    def get_circular_mask(self, radius, center):
+        mask = CircularMask(self._wfmask.shape,
+                            maskRadius=radius, maskCenter=center)
+        return mask.mask()
+
+    def get_centered_circular_mask(self):
+        '''
+        centered wrt the intersection mask
+        '''
+        circular_mask = self._wfmask
+        # center pixel coord of the full map
+        central_ypix = self._wfmask.shape[0] // 2
+        central_xpix = self._wfmask.shape[1] // 2
+        HeightInPixels = (self._wfmask[:, central_xpix] == False).sum()
+        WidthInPixels = (self._wfmask[central_ypix, :] == False).sum()
+
+        offsetX = (self._wfmask[central_ypix,
+                                0:self._wfmask.shape[1] // 2] == True).sum()
+        offsetY = (self._wfmask[0:self._wfmask.shape[0] //
+                                2, central_xpix] == True).sum()
+        # center of False map and origin of circular mask in pixel
+        yc0 = offsetY + HeightInPixels // 2
+        xc0 = offsetX + WidthInPixels // 2
+        RadiusInPixels = min(WidthInPixels, HeightInPixels) // 2
+        for j in range(self._wfmask.shape[0]):
+            for i in range(self._wfmask.shape[1]):
+                Distanceinpixels = np.sqrt(
+                    (j - yc0)**2 + (i - xc0)**2)
+                if(Distanceinpixels <= RadiusInPixels):
+                    circular_mask[j, i] = False
+                else:
+                    circular_mask[j, i] = True
+        return circular_mask, RadiusInPixels, yc0, xc0
+
+
 # da provare sul file cplm_all_fixed fatto il 17/3
 
 class ModeGenerator():
 
     NORM_AT_THIS_CMD = 13  # such that wyko noise and saturation are avoided
+    VISIBLE_AT_THIS_CMD = 19  # related cmd for actuators visibility in the given mask
 
     def __init__(self, cpla, mcl):
         self._cpla = cpla
@@ -445,10 +487,10 @@ class ModeGenerator():
 
     def _check_actuators_visibility(self, cmd=None):
         if cmd is None:
-            self._cmd_for_visibility = self.NORM_AT_THIS_CMD
+            cmd = self.VISIBLE_AT_THIS_CMD
         self._rms_wf = np.zeros(self._n_of_act)
         for act in range(self._n_of_act):
-            self._rms_wf[act] = np.ma.array(data=self._cpla._wfs[act, self._cmd_for_visibility],
+            self._rms_wf[act] = np.ma.array(data=self._cpla._wfs[act, cmd],
                                             mask=self._pupil_mask).std()
 
     def _show_actuators_visibility(self):
@@ -456,8 +498,8 @@ class ModeGenerator():
         plt.clf()
         plt.ion()
         plt.plot(self._rms_wf / 1.e-9, 'o', label='cmd=%d' %
-                 self._cmd_for_visibility)
-        plt.xlabel('#Nactuator', size=25)
+                 self.VISIBLE_AT_THIS_CMD)
+        plt.xlabel('#N actuator', size=25)
         plt.ylabel('Wavefront rms [nm]', size=25)
         plt.grid()
         plt.legend(loc='best')
@@ -468,75 +510,103 @@ class ModeGenerator():
         self._acts_in_pupil = np.where(
             self._rms_wf > THRESHOLD_RMS * self._rms_wf.max())[0]
 
-    def create_circular_mask(self, radius, center):
-        mask = CircularMask(self._imask.shape,
-                            maskRadius=radius, maskCenter=center)
-        return mask.mask()
-
-    def create_centered_circular_mask(self):
-        '''
-        centered wrt the intersection mask
-        '''
-        circular_imask = self._imask
-        # center pixel coord of the full map
-        central_ypix = self._imask.shape[0] // 2
-        central_xpix = self._imask.shape[1] // 2
-        HeightInPixels = (self._imask[:, central_xpix] == False).sum()
-        BaseInPixels = (self._imask[central_ypix, :] == False).sum()
-
-        offsetX = (self._imask[central_ypix,
-                               0:self._imask.shape[1] // 2] == True).sum()
-        offsetY = (self._imask[0:self._imask.shape[0] //
-                               2, central_xpix] == True).sum()
-        # center of False map and origin of circular mask in pixel
-        yc0 = offsetY + HeightInPixels // 2
-        xc0 = offsetX + BaseInPixels // 2
-        RadiusInPixels = min(BaseInPixels, HeightInPixels) // 2
-        for j in range(self._imask.shape[0]):
-            for i in range(self._imask.shape[1]):
-                Distanceinpixels = np.sqrt(
-                    (j - yc0)**2 + (i - xc0)**2)
-                if(Distanceinpixels <= RadiusInPixels):
-                    circular_imask[j, i] = False
-                else:
-                    circular_imask[j, i] = True
-        return circular_imask
+    # def create_circular_mask(self, radius, center):
+    #     mask = CircularMask(self._imask.shape,
+    #                         maskRadius=radius, maskCenter=center)
+    #     return mask.mask()
+    #
+    # def create_centered_circular_mask(self):
+    #     '''
+    #     centered wrt the intersection mask
+    #     '''
+    #     circular_imask = self._imask
+    #     # center pixel coord of the full map
+    #     central_ypix = self._imask.shape[0] // 2
+    #     central_xpix = self._imask.shape[1] // 2
+    #     HeightInPixels = (self._imask[:, central_xpix] == False).sum()
+    #     WidthInPixels = (self._imask[central_ypix, :] == False).sum()
+    #
+    #     offsetX = (self._imask[central_ypix,
+    #                            0:self._imask.shape[1] // 2] == True).sum()
+    #     offsetY = (self._imask[0:self._imask.shape[0] //
+    #                            2, central_xpix] == True).sum()
+    #     # center of False map and origin of circular mask in pixel
+    #     yc0 = offsetY + HeightInPixels // 2
+    #     xc0 = offsetX + WidthInPixels // 2
+    #     RadiusInPixels = min(WidthInPixels, HeightInPixels) // 2
+    #     for j in range(self._imask.shape[0]):
+    #         for i in range(self._imask.shape[1]):
+    #             Distanceinpixels = np.sqrt(
+    #                 (j - yc0)**2 + (i - xc0)**2)
+    #             if(Distanceinpixels <= RadiusInPixels):
+    #                 circular_imask[j, i] = False
+    #             else:
+    #                 circular_imask[j, i] = True
+    #     return circular_imask
 
     def _normalize_influence_function(self, act):
         return (self._cpla._wfs[act, self.NORM_AT_THIS_CMD][self._pupil_mask == False] /
                 self._mcl._deflection[act, self.NORM_AT_THIS_CMD]).data
 
     def _build_interaction_matrix(self):
+        if self._acts_in_pupil is None:
+            selected_act_list = self._cpla._actuators_list
+        else:
+            selected_act_list = self._acts_in_pupil
         self._im = np.column_stack([self._normalize_influence_function(
-            act) for act in self._cpla._actuators_list])
+            act) for act in selected_act_list])
 
     def _build_reconstruction_matrix(self):
         self._rec = np.linalg.pinv(self._im)
 
     def compute_reconstructor(self, mask=None):
         # TODO: check that mask.shape is equal to self._imask.shape
+        if mask is None:
+            mask = self._imask
+        assert self._imask.shape == mask.shape, f"mask has not the same dimension of self._imask!\nGot:{mask.shape}\nShould be:{self._imask.shape}"
         self._pupil_mask = np.ma.mask_or(self._imask, mask)
         self._build_valid_actuators_list()
         self._build_interaction_matrix()
-
-    def build_i_instances(self):
-        self._build_interaction_matrix()
         self._build_reconstruction_matrix()
 
-    def build_instances_with_Circular_imask(self):
-        self._build_circular_imask()
-        self._imask = self._Circular_imask
-        self._build_interaction_matrix()
-        self._build_reconstruction_matrix()
+    # def build_i_instances(self):
+    #     self._build_interaction_matrix()
+    #     self._build_reconstruction_matrix()
 
-    def _BuildInteractionMatrixInCircularPupil(self, cmd):
-        self._chosen_act_list = self._get_clear_actuators_for_IF(cmd)
-
-        self._im = np.column_stack([self._normalize_influence_function(
-            act) for act in self._chosen_act_list])
+    # def build_instances_with_Circular_imask(self):
+    #     self._build_circular_imask()
+    #     self._imask = self._Circular_imask
+    #     self._build_interaction_matrix()
+    #     self._build_reconstruction_matrix()
+    #
+    # def _build_interaction_matrix_in_circular_pupil(self, cmd):
+    #
+    #     self._im = np.column_stack([self._normalize_influence_function(
+    #         act) for act in self._acts_in_pupil])
 
     def generate_mode(self, wfmap):
         self._wfmode = np.ma.array(data=wfmap, mask=self._pupil_mask)
+
+    def generate_zernike_mode_on_pupil(self, j, diameter, AmpInMeters):
+        # PixelsInPupil = (self._pupil_mask == False).sum()
+        # PupilDiameterInPixels = np.sqrt(4 * PixelsInPupil / np.pi))
+        PupilDiameterInPixels = diameter
+        zg = ZernikeGenerator(PupilDiameterInPixels)
+        self._wfmode = np.zeros(self._pupil_mask.shape)
+        self._wfmode = np.ma.array(data=self._wfmode, mask=self._pupil_mask)
+        z_mode = zg.getZernike(j)
+        a = (z_mode.mask == False).sum()
+        b = (self._wfmode.mask == False).sum()
+        assert a == b, f"zerike valid points: {a}  wfmode valid points: {b}\nShould be equal!"
+        unmasked_index_wf = np.ma.where(self._wfmode.mask == False)
+        unmasked_index_zernike = np.ma.where(z_mode.mask == False)
+        self._wfmode[unmasked_index_wf[0], unmasked_index_wf[1]
+                     ] = z_mode.data[unmasked_index_zernike[0], unmasked_index_zernike[1]]
+        self._wfmode = self._wfmode * AmpInMeters
+        # for j in unmasked_index_wf[1]:
+        #     for i in unmasked_index_wf[0]:
+        #         self._wfmode[i,j]=
+        #
 
     def generate_tilt(self):
         self._wfmode = np.tile(np.linspace(-100e-9, 100e-9, 640), (486, 1))
@@ -547,15 +617,19 @@ class ModeGenerator():
             wfmap = self._wfmode
         pos = np.dot(self._rec, wfmap[self._pupil_mask == False])
         # check and clip cmds
-        for act, stroke in enumerate(pos):
-            max_stroke = np.max(self._mcl._deflection[act])
-            min_stroke = np.min(self._mcl._deflection[act])
-            if(stroke > max_stroke):
-                pos[act] = max_stroke
-                print('act%d reached max stroke' % act)
-            if(stroke < min_stroke):
-                pos[act] = min_stroke
-                print('act%d reached min stroke' % act)
+        # should I clip voltage or stroke cmds?
+        # act's stroke increases when moved with its neighbour
+        for idx in range(len(pos)):
+            max_stroke = np.max(
+                self._mcl._deflection[self._acts_in_pupil[idx]])
+            min_stroke = np.min(
+                self._mcl._deflection[self._acts_in_pupil[idx]])
+            if(pos[idx] > max_stroke):
+                pos[idx] = max_stroke
+                print('act%d reached max stroke' % self._acts_in_pupil[idx])
+            if(pos[idx] < min_stroke):
+                pos[idx] = min_stroke
+                print('act%d reached min stroke' % self._acts_in_pupil[idx])
         return pos
 
     def build_fitted_wavefront(self, wfmap=None):
@@ -569,7 +643,7 @@ class ModeGenerator():
         self._wffitted = np.ma.array(
             data=self._wffitted, mask=self._pupil_mask)
 
-    def plot_generated_and_expected_WF(self):
+    def plot_generated_and_expected_wf(self):
         plt.figure()
         plt.clf()
         plt.imshow(self._wfmode)
@@ -587,9 +661,12 @@ class ModeGenerator():
         plt.title('Mode difference', size=25)
 
         print("Expectations:")
-        print("mode amplitude: %g m rms " % self._wfmode.std())
+        amp = self._wfmode.std()
+        amp = amp / 1.e-9
+        print("mode amplitude: %g nm rms " % amp)
         fitting_error = (self._wffitted - self._wfmode).std()
-        print("fitting error: %g m rms " % fitting_error)
+        fitting_error = fitting_error / 1.e-9
+        print("fitting error: %g nm rms " % fitting_error)
 
     def vector_to_map(self, wf_vector):
         mappa = np.zeros(
@@ -610,16 +687,18 @@ class ModeMeasurer():
         flat_cmd = np.zeros(self._bmc.get_number_of_actuators())
         self._bmc.set_shape(flat_cmd)
         wfflat = self._interf.wavefront()
+        act_list = mg._acts_in_pupil
 
         cmd = np.zeros(self._bmc.get_number_of_actuators())
-        for act, stroke in enumerate(pos.data):
-            cmd[act] = mcl.p2c(act, stroke)
+        # should I clip voltage or stroke cmds?
+        for idx in range(len(pos)):
+            cmd[act_list[idx]] = mcl.p2c(act_list[idx], pos[idx])
 
         self._bmc.set_shape(cmd)
         #_get_wavefront_flat_subtracted
         wfflatsub = self._interf.wavefront() - wfflat
         self._wfmeas = wfflatsub - np.ma.median(wfflatsub)
-        self._wfmeas = np.ma.array(data=self._wfmeas, mask=mg._imask)
+        self._wfmeas = np.ma.array(data=self._wfmeas, mask=mg._pupil_mask)
 
     def plot_expected_and_measured_mode(self, wffitted):
         plt.figure()
@@ -879,13 +958,14 @@ class InfluenceFunctionMeasurer():
                 }
 
 
-class PitchMeasurer():
-    # Mems product info
+class PixelRuler():
+    # Mems info
     DefaultPitchInMeters = 450.e-6
     DefaultApertureInMeters = 4.95e-3
     DistanceInPitch = 7
     NactInDistanceInPitch = DistanceInPitch + 1
     NactsInLine = 12
+    ActsAroundBarycenter = [63, 64, 75, 76]
 
     def __init__(self, cpla):
         self._cpla = cpla
@@ -913,3 +993,12 @@ class PitchMeasurer():
             pixdist[i] = self._get_pixel_distance_between_peaks(
                 act1[i], act2[i])
         return pixdist
+
+    def get_barycenter_around_actuators(self):
+        y = np.zeros_like(self.ActsAroundBarycenter)
+        x = np.zeros_like(self.ActsAroundBarycenter)
+        for i, act in enumerate(self.ActsAroundBarycenter):
+            y[i], x[i] = self._cpla._get_max_pixel(act)
+        y_barycenter = y.sum() // len(y)
+        x_barycenter = x.sum() // len(x)
+        return y_barycenter, x_barycenter
