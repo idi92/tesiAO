@@ -474,6 +474,7 @@ class ModeGenerator():
 
     NORM_AT_THIS_CMD = 13  # such that wyko noise and saturation are avoided
     VISIBLE_AT_THIS_CMD = 19  # related cmd for actuators visibility in the given mask
+    THRESHOLD_RMS = 0.5  # threshold for nasty actuators outside a given mask
 
     def __init__(self, cpla, mcl):
         self._cpla = cpla
@@ -505,10 +506,10 @@ class ModeGenerator():
         plt.legend(loc='best')
 
     def _build_valid_actuators_list(self, cmd=None):
-        THRESHOLD_RMS = 0.5
+
         self._check_actuators_visibility(cmd)
         self._acts_in_pupil = np.where(
-            self._rms_wf > THRESHOLD_RMS * self._rms_wf.max())[0]
+            self._rms_wf > self.THRESHOLD_RMS * self._rms_wf.max())[0]
 
     # def create_circular_mask(self, radius, center):
     #     mask = CircularMask(self._imask.shape,
@@ -569,27 +570,15 @@ class ModeGenerator():
         self._build_interaction_matrix()
         self._build_reconstruction_matrix()
 
-    # def build_i_instances(self):
-    #     self._build_interaction_matrix()
-    #     self._build_reconstruction_matrix()
-
-    # def build_instances_with_Circular_imask(self):
-    #     self._build_circular_imask()
-    #     self._imask = self._Circular_imask
-    #     self._build_interaction_matrix()
-    #     self._build_reconstruction_matrix()
-    #
-    # def _build_interaction_matrix_in_circular_pupil(self, cmd):
-    #
-    #     self._im = np.column_stack([self._normalize_influence_function(
-    #         act) for act in self._acts_in_pupil])
-
     def generate_mode(self, wfmap):
         self._wfmode = np.ma.array(data=wfmap, mask=self._pupil_mask)
 
     def generate_zernike_mode_on_pupil(self, j, diameter, AmpInMeters):
         # PixelsInPupil = (self._pupil_mask == False).sum()
         # PupilDiameterInPixels = np.sqrt(4 * PixelsInPupil / np.pi))
+        # TODO: compute diameter from pupil_mask
+        # TODO: check zernike_generator:
+        #       find a way to input pupil_mask
         PupilDiameterInPixels = diameter
         zg = ZernikeGenerator(PupilDiameterInPixels)
         self._wfmode = np.zeros(self._pupil_mask.shape)
@@ -603,10 +592,6 @@ class ModeGenerator():
         self._wfmode[unmasked_index_wf[0], unmasked_index_wf[1]
                      ] = z_mode.data[unmasked_index_zernike[0], unmasked_index_zernike[1]]
         self._wfmode = self._wfmode * AmpInMeters
-        # for j in unmasked_index_wf[1]:
-        #     for i in unmasked_index_wf[0]:
-        #         self._wfmode[i,j]=
-        #
 
     def generate_tilt(self):
         self._wfmode = np.tile(np.linspace(-100e-9, 100e-9, 640), (486, 1))
@@ -646,18 +631,19 @@ class ModeGenerator():
     def plot_generated_and_expected_wf(self):
         plt.figure()
         plt.clf()
-        plt.imshow(self._wfmode)
-        plt.colorbar()
+        plt.imshow(self._wfmode / 1.e-9)
+        plt.colorbar(label='[nm]')
         plt.title('Generated Mode', size=25)
+
         plt.figure()
         plt.clf()
-        plt.imshow(self._wffitted)
-        plt.colorbar()
+        plt.imshow(self._wffitted / 1.e-9)
+        plt.colorbar(label='[nm]')
         plt.title('Fitted Mode', size=25)
         plt.figure()
         plt.clf()
-        plt.imshow(self._wffitted - self._wfmode)
-        plt.colorbar()
+        plt.imshow((self._wffitted - self._wfmode) / 1.e-9)
+        plt.colorbar(label='[nm]')
         plt.title('Mode difference', size=25)
 
         print("Expectations:")
@@ -676,6 +662,8 @@ class ModeGenerator():
 
 
 class ModeMeasurer():
+    # fraction of valid pixels in wf measures: avoids nasty maps
+    THRESHOLD_RATIO = 0.99
 
     def __init__(self, interferometer, mems_deformable_mirror):
         self._interf = interferometer
@@ -684,42 +672,90 @@ class ModeMeasurer():
     def execute_measure(self, mcl, mg, pos=None):
         if pos is None:
             pos = mg.get_position_cmds_from_wf()
+
         flat_cmd = np.zeros(self._bmc.get_number_of_actuators())
         self._bmc.set_shape(flat_cmd)
-        wfflat = self._interf.wavefront()
-        act_list = mg._acts_in_pupil
 
+        expected_valid_points = (mg._pupil_mask == False).sum()
+
+        wfflat = self._interf.wavefront()
+        wfflat = np.ma.array(data=wfflat, mask=mg._pupil_mask)
+        # avoid nasty wf maps
+        measured_valid_points = (wfflat.mask == False).sum()
+        ratio = measured_valid_points / expected_valid_points
+        while(ratio < self.THRESHOLD_RATIO):
+            print('Warning: Nasty map acquired!Reloading...')
+            wfflat = self._interf.wavefront()
+            wfflat = np.ma.array(data=wfflat, mask=mg._pupil_mask)
+            measured_valid_points = (wfflat.mask == False).sum()
+            ratio = measured_valid_points / expected_valid_points
+
+        act_list = mg._acts_in_pupil
         cmd = np.zeros(self._bmc.get_number_of_actuators())
-        # should I clip voltage or stroke cmds?
+        # TODO: clip voltage!
         for idx in range(len(pos)):
             cmd[act_list[idx]] = mcl.p2c(act_list[idx], pos[idx])
-
         self._bmc.set_shape(cmd)
         #_get_wavefront_flat_subtracted
         wfflatsub = self._interf.wavefront() - wfflat
         self._wfmeas = wfflatsub - np.ma.median(wfflatsub)
         self._wfmeas = np.ma.array(data=self._wfmeas, mask=mg._pupil_mask)
+        # avoid nasty wf maps
+        measured_valid_points = (self._wfmeas.mask == False).sum()
+        ratio = measured_valid_points / expected_valid_points
+        while(ratio < self.THRESHOLD_RATIO):
+            print('Warning: Nasty map acquired!Reloading...')
+            wfflatsub = self._interf.wavefront() - wfflat
+            self._wfmeas = wfflatsub - np.ma.median(wfflatsub)
+            self._wfmeas = np.ma.array(data=self._wfmeas, mask=mg._pupil_mask)
+            measured_valid_points = (self._wfmeas.mask == False).sum()
+            ratio = measured_valid_points / expected_valid_points
 
-    def plot_expected_and_measured_mode(self, wffitted):
+    def plot_expected_and_measured_mode(self, wfexpected):
         plt.figure()
         plt.clf()
         plt.ion()
-        plt.imshow(self._wfmeas)
-        plt.colorbar()
+        plt.imshow(self._wfmeas / 1.e-9)
+        plt.colorbar(label='[nm]')
         plt.title('Observed Mode', size=25)
         plt.figure()
         plt.clf()
         plt.ion()
-        plt.imshow(self._wfmeas - wffitted)
-        plt.colorbar()
+        plt.imshow((self._wfmeas - wfexpected) / 1.e-9)
+        plt.colorbar(label='[nm]')
         plt.title('Difference Observed-Expected', size=25)
         print("Observation:")
         amp_mode = self._wfmeas.std()
         amp_mode = amp_mode / 1.e-9
         print("mode amplitude: %g nm rms " % amp_mode)
-        fitting_meas_error = (self._wfmeas - wffitted).std()
+        fitting_meas_error = (self._wfmeas - wfexpected).std()
         fitting_meas_error = fitting_meas_error / 1.e-9
         print("fitting error: %g nm rms " % fitting_meas_error)
+
+      
+class ActuatorsInPupilThresholdAnalyzer():
+    #TODO: data la pupilla e dati i modi che si vogliono generare,
+    # determinare la lista degli attuatori che minimizzano il fitting error osservato
+    # sia per ciascun modo che per quelli che si vogliono generare
+    # to be continued...
+    Nmeasures = 20
+    THRESHOLD_SPAN = np.linspace(0.01, 0.5, Nmeasures)
+
+    def __init__(self, mg, mm, pupil_mask):
+        self._mode_generator = mg
+        self._mode_measurer = mm
+        self._pupil_mask = pupil_mask
+    
+    def _spot_threshold_per_mode(self, j):
+        for threshold in self.THRESHOLD_SPAN:
+        self._mode_generator.THRESHOLD_RMS=threshold
+        self._mode_generator.compute_reconstructor(mask=self._pupil_mask)
+        self._mode_generator.generate_zernike_mode_on_pupil(j,240,50.e-9)
+        self._mode_generator.build_fitted_wavefront()
+        amp = self._mode_generator._wfmode.std()
+        fitting_error = (self._mode_generator._wffitted - self._mode_generator._wfmode).std()
+        
+        
 
 
 def provarec(cpla, mcl):
