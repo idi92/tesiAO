@@ -431,14 +431,43 @@ def plot_single_curve(mcl, act):
 class PupilMaskBuilder():
 
     def __init__(self, wfmask):
-        self._wfmask = wfmask
+        self._wfmask = wfmask  # is the interferometer mask!
 
     def get_circular_mask(self, radius, center):
         mask = CircularMask(self._wfmask.shape,
                             maskRadius=radius, maskCenter=center)
-        return mask.mask()
+        return mask  # .mask()
+    # TODO: provare ad ottenere la stessa maschera circolare usando
+    # get_circular_mask e get_centered_circular_mask
+    # la cmask che uso, e l'unica che funziona, ha
+    # r_pix=120 e yc,xc=(240,308) che sono le coord del baricentro
+    # ottenuto da quello degli attuatori al centro[63,64,75,76]
+    # che sono diverse dalle cord del pixel centrale della parte di maschera a
+    # False di imask==wfmask!
 
-    def get_centered_circular_mask(self):
+    def get_centred_circular_mask_wrt_interferometer_mask(self):
+        # TODO: controllare che i dati a False siano una mappa rettangolare
+        # prendo un generico pixel che sia a False per ricostruire base
+        # e altezza della mappa rettangolare a False
+        yFalsePixel = np.where(self._wfmask == False)[0][0]
+        xFalsePixel = np.where(self._wfmask == False)[1][0]
+        HeightInPixels = (self._wfmask[:, xFalsePixel] == False).sum()
+        WidthInPixels = (self._wfmask[yFalsePixel, :] == False).sum()
+
+        offsetX = (self._wfmask[yFalsePixel, 0:xFalsePixel] == True).sum()
+        offsetY = (self._wfmask[0:yFalsePixel, xFalsePixel] == True).sum()
+        # center of False map and origin of circular pupil in pixel
+        yc0 = offsetY + 0.5 * HeightInPixels
+        xc0 = offsetX + 0.5 * WidthInPixels
+        MaxRadiusInPixel = min(WidthInPixels, HeightInPixels) * 0.5
+        cmask = self.get_circular_mask(MaxRadiusInPixel, (yc0, xc0))
+
+        return cmask
+
+    def build_max_radius_and_pupil_in_imask(self):
+        self._max_radius_in_imask, self._max_pupil_in_imask = self.get_centred_circular_mask_wrt_interferometer_mask()
+
+    def _get_centered_circular_mask(self):
         '''
         centered wrt the intersection mask
         '''
@@ -446,6 +475,10 @@ class PupilMaskBuilder():
         # center pixel coord of the full map
         central_ypix = self._wfmask.shape[0] // 2
         central_xpix = self._wfmask.shape[1] // 2
+        # questo supponendo che il pixel centrale di tutto
+        # il frame sia compreso dei dati a False...
+        assert self._wfmask[central_ypix,
+                            central_xpix] == False, f"Centred pixel of the full map is outside the useful(namely False) data!"
         HeightInPixels = (self._wfmask[:, central_xpix] == False).sum()
         WidthInPixels = (self._wfmask[central_ypix, :] == False).sum()
 
@@ -511,40 +544,6 @@ class ModeGenerator():
         self._acts_in_pupil = np.where(
             self._rms_wf > self.THRESHOLD_RMS * self._rms_wf.max())[0]
 
-    # def create_circular_mask(self, radius, center):
-    #     mask = CircularMask(self._imask.shape,
-    #                         maskRadius=radius, maskCenter=center)
-    #     return mask.mask()
-    #
-    # def create_centered_circular_mask(self):
-    #     '''
-    #     centered wrt the intersection mask
-    #     '''
-    #     circular_imask = self._imask
-    #     # center pixel coord of the full map
-    #     central_ypix = self._imask.shape[0] // 2
-    #     central_xpix = self._imask.shape[1] // 2
-    #     HeightInPixels = (self._imask[:, central_xpix] == False).sum()
-    #     WidthInPixels = (self._imask[central_ypix, :] == False).sum()
-    #
-    #     offsetX = (self._imask[central_ypix,
-    #                            0:self._imask.shape[1] // 2] == True).sum()
-    #     offsetY = (self._imask[0:self._imask.shape[0] //
-    #                            2, central_xpix] == True).sum()
-    #     # center of False map and origin of circular mask in pixel
-    #     yc0 = offsetY + HeightInPixels // 2
-    #     xc0 = offsetX + WidthInPixels // 2
-    #     RadiusInPixels = min(WidthInPixels, HeightInPixels) // 2
-    #     for j in range(self._imask.shape[0]):
-    #         for i in range(self._imask.shape[1]):
-    #             Distanceinpixels = np.sqrt(
-    #                 (j - yc0)**2 + (i - xc0)**2)
-    #             if(Distanceinpixels <= RadiusInPixels):
-    #                 circular_imask[j, i] = False
-    #             else:
-    #                 circular_imask[j, i] = True
-    #     return circular_imask
-
     def _normalize_influence_function(self, act):
         return (self._cpla._wfs[act, self.NORM_AT_THIS_CMD][self._pupil_mask == False] /
                 self._mcl._deflection[act, self.NORM_AT_THIS_CMD]).data
@@ -560,12 +559,18 @@ class ModeGenerator():
     def _build_reconstruction_matrix(self):
         self._rec = np.linalg.pinv(self._im)
 
-    def compute_reconstructor(self, mask=None):
+    def compute_reconstructor(self, mask_obj=None):
         # TODO: check that mask.shape is equal to self._imask.shape
-        if mask is None:
-            mask = self._imask
+        # WARNING: zernike_generator uses the pupil mask as the object!!!
+        # while self._pupil_mask is a bool array!
+        if mask_obj is None:
+            mask = self._imask  # bool array
+        else:
+            self._pupil_mask_obj = mask_obj
+            mask = self._pupil_mask_obj.mask()
         assert self._imask.shape == mask.shape, f"mask has not the same dimension of self._imask!\nGot:{mask.shape}\nShould be:{self._imask.shape}"
         self._pupil_mask = np.ma.mask_or(self._imask, mask)
+
         self._build_valid_actuators_list()
         self._build_interaction_matrix()
         self._build_reconstruction_matrix()
@@ -573,20 +578,15 @@ class ModeGenerator():
     def generate_mode(self, wfmap):
         self._wfmode = np.ma.array(data=wfmap, mask=self._pupil_mask)
 
-    def generate_zernike_mode_on_pupil(self, j, diameter, AmpInMeters):
-        # PixelsInPupil = (self._pupil_mask == False).sum()
-        # PupilDiameterInPixels = np.sqrt(4 * PixelsInPupil / np.pi))
-        # TODO: compute diameter from pupil_mask
-        # TODO: check zernike_generator:
-        #       find a way to input pupil_mask
-        PupilDiameterInPixels = diameter
-        zg = ZernikeGenerator(PupilDiameterInPixels)
+    def generate_zernike_mode(self, j, AmpInMeters):
+        zg = ZernikeGenerator(self._pupil_mask_obj)
         self._wfmode = np.zeros(self._pupil_mask.shape)
         self._wfmode = np.ma.array(data=self._wfmode, mask=self._pupil_mask)
         z_mode = zg.getZernike(j)
         a = (z_mode.mask == False).sum()
         b = (self._wfmode.mask == False).sum()
         assert a == b, f"zerike valid points: {a}  wfmode valid points: {b}\nShould be equal!"
+        # should be useless
         unmasked_index_wf = np.ma.where(self._wfmode.mask == False)
         unmasked_index_zernike = np.ma.where(z_mode.mask == False)
         self._wfmode[unmasked_index_wf[0], unmasked_index_wf[1]
@@ -664,6 +664,9 @@ class ModeGenerator():
 class ModeMeasurer():
     # fraction of valid pixels in wf measures: avoids nasty maps
     THRESHOLD_RATIO = 0.99
+    fnpath = 'prova/static_zernike_modes/'
+    ffmt = '.png'
+    AmpInNanometer = 100
 
     def __init__(self, interferometer, mems_deformable_mirror):
         self._interf = interferometer
@@ -732,9 +735,79 @@ class ModeMeasurer():
         fitting_meas_error = fitting_meas_error / 1.e-9
         print("fitting error: %g nm rms " % fitting_meas_error)
 
-      
+    def _test_modes_measure(self, mcl, mg, Nmodes):
+        j_modes = np.arange(2, Nmodes + 1, dtype='int')
+        Nmodes = len(j_modes)
+        a_j = self.AmpInNanometer * 1.e-9
+        A = self.AmpInNanometer
+        expected_modes_stat = np.zeros((Nmodes, 1, 2))
+        measured_modes_stat = np.zeros((Nmodes, 1, 2))
+
+        for idx, j in enumerate(j_modes):
+            j = int(j)
+            mg.generate_zernike_mode(j, a_j)
+            mg.build_fitted_wavefront()
+            exp_wf_rms = mg._wfmode.std()
+            exp_fitting_error = (mg._wffitted - mg._wfmode).std()
+
+            self.execute_measure(mcl, mg)
+            meas_wf_rms = self._wfmeas.std()
+            meas_fitting_error = (self._wfmeas - mg._wfmode).std()
+
+            plt.ioff()
+            plt.figure()
+            plt.clf()
+            plt.imshow(mg._wfmode / 1.e-9)
+            plt.colorbar(label='[nm]')
+            plt.title('Generated Mode')
+            plt.savefig(fname=self.fnpath + 'Z%d' %
+                        j + '_1gen' + '_A%d' % A + self.ffmt, bbox_inches='tight')
+            plt.close()
+            plt.figure()
+            plt.clf()
+            plt.imshow((mg._wffitted) / 1.e-9)
+            plt.colorbar(label='[nm]')
+            plt.title('Fitted')
+            plt.savefig(fname=self.fnpath + 'Z%d' %
+                        j + '_2fitted' + '_A%d' % A + self.ffmt, bbox_inches='tight')
+            plt.close()
+            plt.figure()
+            plt.clf()
+            plt.imshow((mg._wffitted - mg._wfmode) / 1.e-9)
+            plt.colorbar(label='[nm]')
+            a = exp_fitting_error / 1.e-9
+            plt.title('Fitted - Generated: rms %g nm' % a)
+            plt.savefig(fname=self.fnpath + 'Z%d' %
+                        j + '_3fitgendiff' + '_A%d' % A + self.ffmt, bbox_inches='tight')
+            plt.close()
+            plt.figure()
+            plt.clf()
+            plt.imshow((self._wfmeas) / 1.e-9)
+            plt.colorbar(label='[nm]')
+            plt.title('Observed Mode')
+            plt.savefig(fname=self.fnpath + 'Z%d' %
+                        j + '_4obs' + '_A%d' % A + self.ffmt, bbox_inches='tight')
+            plt.close()
+            plt.figure()
+            plt.clf()
+            plt.imshow((self._wfmeas - mg._wfmode) / 1.e-9)
+            plt.colorbar(label='[nm]')
+            a = meas_fitting_error / 1.e-9
+            plt.title('Observed - Generated: rms %g nm' % a)
+            plt.savefig(fname=self.fnpath + 'Z%d' %
+                        j + '_5obsgendiff' + '_A%d' % A + self.ffmt, bbox_inches='tight')
+            plt.close()
+
+            expected_modes_stat[idx, 0, 0] = exp_wf_rms
+            expected_modes_stat[idx, 0, 1] = exp_fitting_error
+            measured_modes_stat[idx, 0, 0] = meas_wf_rms
+            measured_modes_stat[idx, 0, 1] = meas_fitting_error
+
+        return expected_modes_stat, measured_modes_stat
+
+
 class ActuatorsInPupilThresholdAnalyzer():
-    #TODO: data la pupilla e dati i modi che si vogliono generare,
+    # TODO: data la pupilla e dati i modi che si vogliono generare,
     # determinare la lista degli attuatori che minimizzano il fitting error osservato
     # sia per ciascun modo che per quelli che si vogliono generare
     # to be continued...
@@ -745,17 +818,16 @@ class ActuatorsInPupilThresholdAnalyzer():
         self._mode_generator = mg
         self._mode_measurer = mm
         self._pupil_mask = pupil_mask
-    
+
     def _spot_threshold_per_mode(self, j):
         for threshold in self.THRESHOLD_SPAN:
-        self._mode_generator.THRESHOLD_RMS=threshold
-        self._mode_generator.compute_reconstructor(mask=self._pupil_mask)
-        self._mode_generator.generate_zernike_mode_on_pupil(j,240,50.e-9)
-        self._mode_generator.build_fitted_wavefront()
-        amp = self._mode_generator._wfmode.std()
-        fitting_error = (self._mode_generator._wffitted - self._mode_generator._wfmode).std()
-        
-        
+            self._mode_generator.THRESHOLD_RMS = threshold
+            self._mode_generator.compute_reconstructor(mask=self._pupil_mask)
+            self._mode_generator.generate_zernike_mode_on_pupil(j, 240, 50.e-9)
+            self._mode_generator.build_fitted_wavefront()
+            amp = self._mode_generator._wfmode.std()
+            fitting_error = (self._mode_generator._wffitted -
+                             self._mode_generator._wfmode).std()
 
 
 def provarec(cpla, mcl):
@@ -1012,7 +1084,7 @@ class PixelRuler():
         y2, x2 = self._cpla._get_max_pixel(act2)
         return np.sqrt((y2 - y1) * (y2 - y1) + (x2 - x1) * (x2 - x1))
 
-    def get_pixel_distance_alongX(self):
+    def _get_pixel_distance_alongX(self):
         act1 = np.arange(24, 31 + 1)
         act2 = np.arange(108, 115 + 1)
         pixdist = np.zeros(self.NactInDistanceInPitch)
@@ -1021,7 +1093,7 @@ class PixelRuler():
                 act1[i], act2[i])
         return pixdist
 
-    def get_pixel_distance_alongY(self):
+    def _get_pixel_distance_alongY(self):
         act1 = np.arange(31, 127, self.NactsInLine)
         act2 = np.arange(24, 120, self.NactsInLine)
         pixdist = np.zeros(self.NactInDistanceInPitch)
@@ -1038,3 +1110,27 @@ class PixelRuler():
         y_barycenter = y.sum() // len(y)
         x_barycenter = x.sum() // len(x)
         return y_barycenter, x_barycenter
+
+    def build_pixel_dim_in_meters(self):
+        distance_list = []
+        distance = self._get_pixel_distance_alongX()
+        for dist in distance:
+            distance_list.append(dist)
+        distance = self._get_pixel_distance_alongY()
+        for dist in distance:
+            distance_list.append(dist)
+        distance_list.append(
+            self._get_pixel_distance_between_peaks(31, 108) / np.sqrt(2))
+        distance_list.append(
+            self._get_pixel_distance_between_peaks(24, 115) / np.sqrt(2))
+        distance_list = np.array(distance_list)
+        self._pixel_mean_dimension_in_meters = self.DistanceInPitch * \
+            self.DefaultPitchInMeters / distance_list.mean()
+        self._pixel_sigma_dimension_in_meters = self._pixel_mean_dimension_in_meters * \
+            distance_list.std() / distance_list.mean()
+
+    def pixel2meter(self, LenghtInPixels):
+        return LenghtInPixels * self._pixel_mean_dimension_in_meters
+
+    def meter2pixel(self, LenghtInMeters):
+        return LenghtInMeters / self._pixel_mean_dimension_in_meters
