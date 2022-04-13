@@ -647,7 +647,7 @@ class ModeGenerator():
         plt.title('Mode difference', size=25)
 
         print("Expectations:")
-        amp = self._wfmode.std()
+        amp = self._wffitted.std()
         amp = amp / 1.e-9
         print("mode amplitude: %g nm rms " % amp)
         fitting_error = (self._wffitted - self._wfmode).std()
@@ -806,28 +806,104 @@ class ModeMeasurer():
         return expected_modes_stat, measured_modes_stat
 
 
-class ActuatorsInPupilThresholdAnalyzer():
+class SuitableActuatorsInPupilAnalyzer():
     # TODO: data la pupilla e dati i modi che si vogliono generare,
-    # determinare la lista degli attuatori che minimizzano il fitting error osservato
-    # sia per ciascun modo che per quelli che si vogliono generare
+    # determinare la lista degli attuatori/threshold che minimizzano il fitting error osservato
+    # dei modi che si vogliono generare
     # to be continued...
-    Nmeasures = 20
-    THRESHOLD_SPAN = np.linspace(0.01, 0.5, Nmeasures)
 
-    def __init__(self, mg, mm, pupil_mask):
+    THRESHOLD_SPAN = np.array([0.01, 0.1, 0.15, 0.25, 0.3, 0.5])
+    Aj_SPAN = 50.e-9 * np.arange(1, 10)
+
+    def __init__(self, mcl, mg, mm, pupil_mask_obj):
+        self._calibration = mcl
         self._mode_generator = mg
         self._mode_measurer = mm
-        self._pupil_mask = pupil_mask
+        self._pupil_mask = pupil_mask_obj
 
-    def _spot_threshold_per_mode(self, j):
-        for threshold in self.THRESHOLD_SPAN:
+    def _test_measure(self, NumOfZmodes):
+        # except Z1
+        jmodes = np.arange(2, NumOfZmodes + 1)
+        self._generated_jmodes = jmodes
+        num_of_gen_modes = len(jmodes)
+        num_of_threshold = len(self.THRESHOLD_SPAN)
+        num_of_ampj = len(self.Aj_SPAN)
+        # per un dato threshold, modo e ampiezza misuro il
+        # fitting error aspettato e misurato
+        self._fitting_sigmas = np.zeros(
+            (num_of_threshold, num_of_ampj, num_of_gen_modes, 2))
+        self._valid_act_per_thres = []
+
+        for thres_idx, threshold in enumerate(self.THRESHOLD_SPAN):
+            print("Threshold set to:%g" % threshold)
             self._mode_generator.THRESHOLD_RMS = threshold
-            self._mode_generator.compute_reconstructor(mask=self._pupil_mask)
-            self._mode_generator.generate_zernike_mode_on_pupil(j, 240, 50.e-9)
-            self._mode_generator.build_fitted_wavefront()
-            amp = self._mode_generator._wfmode.std()
-            fitting_error = (self._mode_generator._wffitted -
-                             self._mode_generator._wfmode).std()
+            self._mode_generator.compute_reconstructor(
+                mask_obj=self._pupil_mask)
+            self._valid_act_per_thres.append(
+                self._mode_generator._acts_in_pupil)
+
+            for amp_idx, aj in enumerate(self.Aj_SPAN):
+                print("Generating Zmode with amplitude[m] set to: %g" % aj)
+                for j_idx, j in enumerate(jmodes):
+
+                    self._mode_generator.generate_zernike_mode(int(j), aj)
+                    self._mode_generator.build_fitted_wavefront()
+                    # expected_amplitude = (self._mode_generator._wffitted).std()
+                    expected_fitting_error = (
+                        self._mode_generator._wffitted - self._mode_generator._wfmode).std()
+                    self._mode_measurer.execute_measure(
+                        self._calibration, self._mode_generator)
+                    # measured_amplitude = (self._mode_measurer._wfmeas).std()
+                    measured_fitting_error = (
+                        self._mode_measurer._wfmeas - self._mode_generator._wfmode).std()
+                    self._fitting_sigmas[thres_idx, amp_idx,
+                                         j_idx] = expected_fitting_error, measured_fitting_error
+
+    def _show_fitting_errors_for(self, threshold, amplitude, jmode):
+        thres_idx = np.where(self.THRESHOLD_SPAN == threshold)[0][0]
+        amp_idx = np.where(self.Aj_SPAN == amplitude)[0][0]
+        j_idx = np.where(self._generated_jmodes == jmode)[0][0]
+        print("Threshold = {}; Amplitude[m] = {}; Mode = Z{}".format(
+            threshold, amplitude, jmode))
+        print("Expected fitting error[m] = {} \nMeasured fitting error[m] = {} ".format(
+            self._fitting_sigmas[thres_idx, amp_idx, j_idx, 0], self._fitting_sigmas[thres_idx, amp_idx, j_idx, 1]))
+
+    def save_results(self, fname):
+        # syntax error see astropy
+        hdr = fits.Header()
+        #hdr['CMASK'] = self._pupil_mask
+        #hdr['AMP_INM'] = self.Aj_SPAN
+        fits.writeto(fname, self._fitting_sigmas, hdr)
+        fits.append(fname, self.THRESHOLD_SPAN)
+        fits.append(fname, self.Aj_SPAN)
+        fits.append(fname, self._generated_jmodes)
+        #fits.append(fname, self._valid_act_per_thres)
+
+    @staticmethod
+    def load(fname):
+        header = fits.getheader(fname)
+        hduList = fits.open(fname)
+        sigma_data = hduList[0].data
+        thres_data = hduList[1].data
+        amp_data = hduList[2].data
+        jmodes_data = hduList[3].data
+        #valid_act_data = hduList[4].data
+        return{'sigmas': sigma_data,
+               'thres': thres_data,
+               'amp': amp_data,
+               'jmode': jmodes_data  # ,
+               #'valid_acts': valid_act_data
+               }
+
+
+class test_saipa_load():
+    def __init__(self, fname):
+        res = SuitableActuatorsInPupilAnalyzer.load(fname)
+        self._sigmas = res['sigmas']
+        self._threshold_span = res['thres']
+        self._amplitude_span = res['amp']
+        self._jmodes = res['jmode']
+        #self._act_list_per_thres = res['valid_acts']
 
 
 def provarec(cpla, mcl):
