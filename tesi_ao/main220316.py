@@ -678,6 +678,7 @@ class ModeMeasurer():
 
         flat_cmd = np.zeros(self._bmc.get_number_of_actuators())
         self._bmc.set_shape(flat_cmd)
+        ref_cmd = self._bmc.get_reference_shape()
 
         expected_valid_points = (mg._pupil_mask == False).sum()
 
@@ -698,6 +699,15 @@ class ModeMeasurer():
         # TODO: clip voltage!
         for idx in range(len(pos)):
             cmd[act_list[idx]] = mcl.p2c(act_list[idx], pos[idx])
+            # giustamente se clippo in tensione...
+            # ValueError: A value in x_new is above the interpolation range.
+            # volt_control = cmd[act_list[idx]] + ref_cmd[act_list[idx]]
+            # if(volt_control > 1.):
+            #     print('act%d reaches min stroke!' % act_list[idx])
+            #     cmd[act_list[idx]] = 1. - ref_cmd[act_list[idx]]
+            # if(volt_control < 0.):
+            #     print('act%d reaches max stroke!' % act_list[idx])
+            #     cmd[act_list[idx]] = 0. - ref_cmd[act_list[idx]]
         self._bmc.set_shape(cmd)
         #_get_wavefront_flat_subtracted
         wfflatsub = self._interf.wavefront() - wfflat
@@ -812,8 +822,8 @@ class SuitableActuatorsInPupilAnalyzer():
     # dei modi che si vogliono generare
     # to be continued...
 
-    THRESHOLD_SPAN = np.array([0.01, 0.1, 0.15, 0.25, 0.3, 0.5])
-    Aj_SPAN = 50.e-9 * np.arange(1, 10)
+    THRESHOLD_SPAN = np.array([0.01, 0.1, 0.2, 0.3, 0.4, 0.5])
+    Aj_SPAN = 100.e-9 * np.arange(1, 6)  # meters
 
     def __init__(self, mcl, mg, mm, pupil_mask_obj):
         self._calibration = mcl
@@ -828,10 +838,18 @@ class SuitableActuatorsInPupilAnalyzer():
         num_of_gen_modes = len(jmodes)
         num_of_threshold = len(self.THRESHOLD_SPAN)
         num_of_ampj = len(self.Aj_SPAN)
+        frame_shape = self._pupil_mask.mask().shape
         # per un dato threshold, modo e ampiezza misuro il
         # fitting error aspettato e misurato
         self._fitting_sigmas = np.zeros(
             (num_of_threshold, num_of_ampj, num_of_gen_modes, 2))
+        self._wfs_gen = np.ma.zeros(
+            (num_of_threshold, num_of_ampj, num_of_gen_modes, frame_shape[0], frame_shape[1]))
+        self._wfs_fitted = np.ma.zeros(
+            (num_of_threshold, num_of_ampj, num_of_gen_modes, frame_shape[0], frame_shape[1]))
+        self._wfs_meas = np.ma.zeros(
+            (num_of_threshold, num_of_ampj, num_of_gen_modes, frame_shape[0], frame_shape[1]))
+
         self._valid_act_per_thres = []
 
         for thres_idx, threshold in enumerate(self.THRESHOLD_SPAN):
@@ -843,7 +861,7 @@ class SuitableActuatorsInPupilAnalyzer():
                 self._mode_generator._acts_in_pupil)
 
             for amp_idx, aj in enumerate(self.Aj_SPAN):
-                print("Generating Zmode with amplitude[m] set to: %g" % aj)
+                print("Generating Zmodes with amplitude[m] set to: %g" % aj)
                 for j_idx, j in enumerate(jmodes):
 
                     self._mode_generator.generate_zernike_mode(int(j), aj)
@@ -858,6 +876,12 @@ class SuitableActuatorsInPupilAnalyzer():
                         self._mode_measurer._wfmeas - self._mode_generator._wfmode).std()
                     self._fitting_sigmas[thres_idx, amp_idx,
                                          j_idx] = expected_fitting_error, measured_fitting_error
+                    self._wfs_gen[thres_idx, amp_idx,
+                                  j_idx] = self._mode_generator._wfmode
+                    self._wfs_fitted[thres_idx, amp_idx,
+                                     j_idx] = self._mode_generator._wffitted
+                    self._wfs_meas[thres_idx, amp_idx,
+                                   j_idx] = self._mode_measurer._wfmeas
 
     def _show_fitting_errors_for(self, threshold, amplitude, jmode):
         thres_idx = np.where(self.THRESHOLD_SPAN == threshold)[0][0]
@@ -868,6 +892,27 @@ class SuitableActuatorsInPupilAnalyzer():
         print("Expected fitting error[m] = {} \nMeasured fitting error[m] = {} ".format(
             self._fitting_sigmas[thres_idx, amp_idx, j_idx, 0], self._fitting_sigmas[thres_idx, amp_idx, j_idx, 1]))
 
+    def _plot_fitting_error_for(self, threshold, amplitude):
+        thres_idx = np.where(self.THRESHOLD_SPAN == threshold)[0][0]
+        amp_idx = np.where(self.Aj_SPAN == amplitude)[0][0]
+        plt.figure()
+        plt.clf()
+
+        exp_fitting_err = self._fitting_sigmas[thres_idx, amp_idx, :, 0]
+        meas_fitting_err = self._fitting_sigmas[thres_idx, amp_idx, :, 1]
+        exp_fitting_err = exp_fitting_err / 1.e-9
+        meas_fitting_err = meas_fitting_err / 1.e-9
+
+        plt.plot(self._generated_jmodes, exp_fitting_err,
+                 'bo-', label='expected')
+        plt.plot(self._generated_jmodes, meas_fitting_err,
+                 'ro-', label='measured')
+        plt.legend(loc='best')
+        plt.title('fitting error: amp[m]=%g' %
+                  amplitude + ' threshold=%g' % threshold, size=25)
+        plt.xlabel('Zmode j index', size=25)
+        plt.ylabel('WF rms [nm]', size=25)
+
     def save_results(self, fname):
         # syntax error see astropy
         hdr = fits.Header()
@@ -877,6 +922,10 @@ class SuitableActuatorsInPupilAnalyzer():
         fits.append(fname, self.THRESHOLD_SPAN)
         fits.append(fname, self.Aj_SPAN)
         fits.append(fname, self._generated_jmodes)
+        fits.append(fname, self._pupil_mask.mask().astype(int))
+        fits.append(fname, self._wfs_gen)
+        fits.append(fname, self._wfs_fitted)
+        fits.append(fname, self._wfs_meas)
         #fits.append(fname, self._valid_act_per_thres)
 
     @staticmethod
@@ -887,22 +936,43 @@ class SuitableActuatorsInPupilAnalyzer():
         thres_data = hduList[1].data
         amp_data = hduList[2].data
         jmodes_data = hduList[3].data
+
+        cmask2d = hduList[4].data.astype(bool)
+        wfs_gen_data = hduList[5].data
+        wfs_fit_data = hduList[6].data
+        wfs_meas_data = hduList[7].data
+
+        wfs_mask = np.ma.zeros(wfs_gen_data.shape)
+        wfs_mask[:, :, :] = cmask2d
+        ma_wfsgen = np.ma.array(data=wfs_gen_data, mask=wfs_mask)
+        ma_wfsfit = np.ma.array(data=wfs_fit_data, mask=wfs_mask)
+        ma_wfsmeas = np.ma.array(data=wfs_meas_data, mask=wfs_mask)
+
         #valid_act_data = hduList[4].data
         return{'sigmas': sigma_data,
                'thres': thres_data,
                'amp': amp_data,
-               'jmode': jmodes_data  # ,
+               'jmode': jmodes_data,
+               'wfsmask': wfs_mask,
+               'wfsgen': ma_wfsgen,
+               'wfsfit': ma_wfsfit,
+               'wfsmeas': ma_wfsmeas
                #'valid_acts': valid_act_data
                }
 
 
-class test_saipa_load():
+class _test_saipa_load():
     def __init__(self, fname):
         res = SuitableActuatorsInPupilAnalyzer.load(fname)
         self._sigmas = res['sigmas']
         self._threshold_span = res['thres']
         self._amplitude_span = res['amp']
         self._jmodes = res['jmode']
+        self._wfs_mask = res['wfsmask']
+        self._wfs_gen = res['wfsgen']
+        self._wfs_fitted = res['wfsfit']
+        self._wfs_meas = res['wfsmeas']
+        self._wfs_mask = res['wfsmask']
         #self._act_list_per_thres = res['valid_acts']
 
 
