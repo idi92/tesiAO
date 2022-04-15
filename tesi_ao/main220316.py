@@ -10,6 +10,8 @@ from scipy.optimize import curve_fit
 from numpy import dtype
 from arte.types.mask import CircularMask
 from arte.utils.zernike_generator import ZernikeGenerator
+from pywt._thresholding import threshold
+from arte.utils import generalized_fitting_error
 
 
 def create_devices():
@@ -892,7 +894,82 @@ class SuitableActuatorsInPupilAnalyzer():
         print("Expected fitting error[m] = {} \nMeasured fitting error[m] = {} ".format(
             self._fitting_sigmas[thres_idx, amp_idx, j_idx, 0], self._fitting_sigmas[thres_idx, amp_idx, j_idx, 1]))
 
-    def _plot_fitting_error_for(self, threshold, amplitude):
+    def _test_recontruct_zmodes_up_to(self, NumOfZmodes, threshold, AmplitudeInMeters):
+        '''
+        per fissato threshold e AmplitudeInMeters, ricostruisce 
+        i primi NumOfZmodes modi di zernike che il mems, potenzialmente,
+        è in grado di riprodurre
+        '''
+        jmodes = np.arange(2, NumOfZmodes + 1)
+        self._expected_fitting_error = np.zeros(len(jmodes))
+        self._mode_generator.THRESHOLD_RMS = threshold
+        self._mode_generator.compute_reconstructor(
+            mask_obj=self._pupil_mask)
+        for idx, j in enumerate(jmodes):
+            self._mode_generator.generate_zernike_mode(
+                int(j), AmplitudeInMeters)
+            self._mode_generator.build_fitted_wavefront()
+            self._expected_fitting_error[idx] = (
+                self._mode_generator._wffitted - self._mode_generator._wfmode).std()
+        print(self._mode_generator._acts_in_pupil)
+        print('Suitable actuators #N = %d' %
+              len(self._mode_generator._acts_in_pupil))
+        plt.figure()
+        plt.clf()
+        plt.plot(jmodes, self._expected_fitting_error /
+                 1.e-9, 'bo-', label='expected')
+        plt.title('expected fitting error for: amp = %g[m]' %
+                  AmplitudeInMeters + ' threshold = %g' % threshold, size=25)
+        plt.xlabel(r'$Z_j$', size=25)
+        plt.ylabel(r'$WF_{fit}-WF_{gen} rms [nm]$', size=25)
+        plt.grid()
+        plt.legend(loc='best')
+        return self._expected_fitting_error
+
+    def _test_compute_exp_fitting_err_up_to(self, NumOfZmodes, AmplitudeInMeters):
+        '''
+        voglio capire fino a quale modo Zj potenzialmente il mems è in grado di riprodurre
+        al variare del numero di attuatori(threshold della visibilità) e al variare dell
+        ampiezza del modo
+        '''
+        jmodes = np.arange(2, NumOfZmodes + 1)
+        num_of_jmodes = len(jmodes)
+        num_of_threshold = len(self.THRESHOLD_SPAN)
+        num_of_valid_acts = np.zeros(len(self.THRESHOLD_SPAN))
+        fitting_error = np.zeros((num_of_threshold, num_of_jmodes))
+        for thres_idx, threshold in enumerate(self.THRESHOLD_SPAN):
+            self._mode_generator.THRESHOLD_RMS = threshold
+            self._mode_generator.compute_reconstructor(
+                mask_obj=self._pupil_mask)
+            num_of_valid_acts[thres_idx] = len(
+                self._mode_generator._acts_in_pupil)
+            for j_idx, j in enumerate(jmodes):
+                self._mode_generator.generate_zernike_mode(
+                    int(j), AmplitudeInMeters)
+                self._mode_generator.build_fitted_wavefront()
+                fitting_error[thres_idx, j_idx] = (
+                    self._mode_generator._wffitted - self._mode_generator._wfmode).std()
+
+        plt.figure()
+        plt.clf()
+        plt.title('expected fitting error for: amp = %g[m]' %
+                  AmplitudeInMeters)
+        self._test_plot_exp_fitting_err(fitting_error, num_of_valid_acts)
+
+        return fitting_error, num_of_valid_acts
+
+    def _test_plot_exp_fitting_err(self, fitting_error, num_of_valid_acts):
+
+        jmodes = 2 + np.arange(fitting_error.shape[1])
+        for thres_idx, thres in enumerate(self.THRESHOLD_SPAN):
+            plt.plot(jmodes, fitting_error[thres_idx] /
+                     1.e-9, 'o-', label='thres=%g' % thres + '#Nact=%d' % num_of_valid_acts[thres_idx])
+        plt.xlabel(r'$Z_j$', size=25)
+        plt.ylabel(r'$WF_{fit}-WF_{gen} rms [nm]$', size=25)
+        plt.grid()
+        plt.legend(loc='best')
+
+    def _plot_fitting_errors_for(self, threshold, amplitude):
         thres_idx = np.where(self.THRESHOLD_SPAN == threshold)[0][0]
         amp_idx = np.where(self.Aj_SPAN == amplitude)[0][0]
         plt.figure()
