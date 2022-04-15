@@ -10,8 +10,6 @@ from scipy.optimize import curve_fit
 from numpy import dtype
 from arte.types.mask import CircularMask
 from arte.utils.zernike_generator import ZernikeGenerator
-from pywt._thresholding import threshold
-from arte.utils import generalized_fitting_error
 
 
 def create_devices():
