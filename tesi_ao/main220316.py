@@ -329,6 +329,8 @@ class MemsCommandLinearization():
         self._cmd_vector = cmd_vector
         self._deflection = deflection
         self._reference_shape_tag = reference_shape_tag
+        # TODO: dopo aver aggiustato tutto mettere fint giusta
+        # self._create_interpolation_test()
         self._create_interpolation()
 
     def _create_interpolation(self):
@@ -1301,7 +1303,17 @@ class TestRepeatedMeasures():
                 cplm.save_results(fname)
 
     def _analyze_measure(self, act_list, n_steps_volt_scan, Ntimes):
-        act_list = np.array([act_list])
+        '''
+        legge i file cplm relativi alle misure ripetute su ogni attuatote,
+        calcola la media delle deflessioni ottenute per ciascun comando
+        in tensione applicato e le salva sul file fits che dovra essere
+        caricato da un oggetto mcl
+        '''
+        if act_list is None:
+            act_list = np.arange(self._bmc.get_number_of_actuators())
+        else:
+            act_list = np.array([act_list])
+
         n_acts = len(act_list)
         self._Ncpla_cmd_vector = np.zeros((Ntimes, n_acts, n_steps_volt_scan))
         self._Ncpla_deflection = np.zeros((Ntimes, n_acts, n_steps_volt_scan))
@@ -1328,8 +1340,58 @@ class TestRepeatedMeasures():
                     self._Ncpla_deflection[:, act_idx, cmd_idx])
         self._mcl = MemsCommandLinearization(
             act_list, cpla._cmd_vector, self._deflection_mean, self._bmc.get_reference_shape_tag())
+        # in realta e inutile perche poi devo fare il load e ricalcolare l
+        # interpolazione
         self._mcl._create_interpolation_test()
         self._mcl.save(self.fpath + 'mcl_all' + self.ffmt)
+
+    def _collapse_all_measured_wfs(self, act_list, n_steps_volt_scan, Ntimes):
+        '''
+        vorrei legge i file cplm relativi alle misure ripetute su ogni attuatote,
+        fare la media delle mappe ottunte per il dato act e cmd, in modo da salvare
+        su file un solo wfmap per ogni act e comando       
+        '''
+        if act_list is None:
+            act_list = np.arange(self._bmc.get_number_of_actuators())
+        else:
+            act_list = np.array([act_list])
+        n_acts = len(act_list)
+        # TODO: prendere il frame direttamente dall interferometro
+        frame_shape = np.array([486, 640])
+        wfs_temp = np.ma.zeros(
+            (Ntimes, n_steps_volt_scan, frame_shape[0], frame_shape[1]))
+        self._collapsed_wfs = np.ma.zeros(
+            (n_acts, n_steps_volt_scan, frame_shape[0], frame_shape[1]))
+        self._collapsed_sigma_wfs = np.ma.zeros(
+            (n_acts, n_steps_volt_scan, frame_shape[0], frame_shape[1]))
+
+        for act_idx, act in enumerate(act_list):
+            for times in np.arange(Ntimes):
+                fname = self.fpath + \
+                    'act%d' % int(act) + 'time%d' % times + self.ffmt
+                cpla = CommandToPositionLinearizationAnalyzer(fname)
+                for cmd_idx in np.arange(n_steps_volt_scan):
+                    wfs_temp[times, cmd_idx] = cpla._wfs[act_idx, cmd_idx]
+            for cmd_idx in np.arange(n_steps_volt_scan):
+                for yi in np.arange(frame_shape[0]):
+                    for xi in np.arange(frame_shape[1]):
+                        self._collapsed_wfs[act_idx, cmd_idx, yi,
+                                            xi] = wfs_temp[:, cmd_idx, yi, xi].mean()
+                        self._collapsed_sigma_wfs[act_idx, cmd_idx, yi,
+                                                  xi] = wfs_temp[:, cmd_idx, yi, xi].std()
+
+        cplm = CommandToPositionLinearizationMeasurer(self._interf, self._bmc)
+        cplm.NUMBER_STEPS_VOLTAGE_SCAN = n_steps_volt_scan
+        cplm._wfs = np.ma.zeros(
+            (n_acts, n_steps_volt_scan, frame_shape[0], frame_shape[1]))
+        cplm._wfs = self._collapsed_wfs
+        cplm._cmd_vector = cpla._cmd_vector
+        cplm._actuators_list = cpla._actuators_list
+        cplm._reference_cmds = self._bmc.get_reference_shape()
+        cplm._reference_tag = self._bmc.get_reference_shape_tag()
+        cplm.NUMBER_WAVEFRONTS_TO_AVERAGE = 1
+        fname = self.fpath + 'cplm_all_mean' + self.ffmt
+        cplm.save_results(fname)
 
     def _plot_deflections_vs_cmd(self, act_list, Ntimes):
 
