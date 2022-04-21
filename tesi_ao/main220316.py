@@ -89,7 +89,7 @@ class CommandToPositionLinearizationMeasurer(object):
 
     def _get_wavefront_flat_subtracted(self):
         dd = self._interf.wavefront(
-            self.NUMBER_WAVEFRONTS_TO_AVERAGE) - self._get_zero_command_wavefront()
+            self.NUMBER_WAVEFRONTS_TO_AVERAGE, timeout_in_sec=10) - self._get_zero_command_wavefront()
         return dd - np.ma.median(dd)
 
     def _reset_flat_wavefront(self):
@@ -332,6 +332,10 @@ class MemsCommandLinearization():
         self._create_interpolation()
 
     def _create_interpolation(self):
+        # WARNING: interp 1d suppone che l argomento sia un array
+        # di valori monotonicamente crescenti(o comunque li riordina) e
+        # le deflessioni non lo sono, per questo motivo in
+        # plot_interpolated_functions osservo delle forti oscillazioni
         self._finter = [interp1d(
             self._deflection[i], self._cmd_vector[i], kind='cubic')
             for i in range(self._cmd_vector.shape[0])]
@@ -407,6 +411,9 @@ def main_calibration(wyko,
 
 
 def plot_interpolated_function(mcl):
+    '''
+    F_int(pos)=cmd
+    '''
     plt.figure()
     plt.clf()
     for idx, act in enumerate(mcl._actuators_list):
@@ -432,6 +439,9 @@ def plot_acquired_measures(mcl):
 
 
 def plot_single_curve(mcl, act):
+    '''
+    F_int(pos)=cmd
+    '''
     plt.figure()
     plt.clf()
     a = np.min(mcl._deflection[act])
@@ -448,6 +458,9 @@ def plot_single_curve(mcl, act):
 
 
 def _plot_pos_vs_cmd(mcl, act):
+    '''
+    F_int(cmd)=pos
+    '''
     plt.figure()
     plt.clf()
     plt.plot(mcl._cmd_vector[act], mcl._deflection[act] /
@@ -458,9 +471,23 @@ def _plot_pos_vs_cmd(mcl, act):
     plt.grid()
     a = np.min(mcl._cmd_vector[act])
     b = np.max(mcl._cmd_vector[act])
-    xx = np.linspace(a, b, 10000)
-    plt.plot(xx, mcl._finter[act](xx) / 1.e-9, '-', label='finter')
+    vv = np.linspace(a, b, 1000)
+    plt.plot(vv, mcl._finter[act](vv) / 1.e-9, '-', label='finter')
     plt.legend(loc='best')
+
+
+def _plot_all_int_funcs(mcl):
+    plt.figure()
+    plt.clf()
+    for idx, act in enumerate(mcl._actuators_list):
+        a = np.min(mcl._cmd_vector[act])
+        b = np.max(mcl._cmd_vector[act])
+        vv = np.linspace(a, b, 1000)
+        plt.plot(vv, mcl._finter[act](vv) / 1.e-9, '.-', label='finter')
+    plt.xlabel('Command [au]', size=25)
+    plt.ylabel('Deflection [nm]', size=25)
+    plt.title('Calibration curve per actuator', size=25)
+    plt.grid()
 
 
 class PupilMaskBuilder():
