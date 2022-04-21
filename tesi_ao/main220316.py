@@ -351,18 +351,46 @@ class MemsCommandLinearization():
         idx = self._get_act_idx(act)
         return self._finter[idx](p)
 
-    def test_p2c(self, act, p):
+    def solve_p2c(self, act, p):
+        '''
+        returns required cmd for a given position/deflection
+        implemented via scipy.optimize.fsolve
+        slows routine?
+        '''
         idx = self._get_act_idx(act)
 
-        def func(cmd):
-            return np.abs(p - self._finter[idx](cmd))
+        def func(cmd): return np.abs(p - self._finter[idx](cmd))
         abs_difference = np.abs(p - self._finter[idx](self._cmd_vector[idx]))
         min_abs_difference = abs_difference.min()
         idx_guess = np.where(abs_difference == min_abs_difference)[0][0]
-        guess = self._cmd_vector[idx, idx_guess[0]]
+        guess = self._cmd_vector[idx, idx_guess]
 
         cmd = fsolve(func, x0=guess)
-        return cmd
+        return cmd[0]
+
+    def linear_p2c(self, act, pos):
+        '''
+        returns required cmd for a given position/deflection
+        implemented via linear interpolation between 2 points
+        close to pos and returns the required cmd
+        should be faster then solve_p2c
+        '''
+        # certo se ricreo ogni volta cmd_span e
+        # pos_span per ogni act forse sara piu lento
+        idx = self._get_act_idx(act)
+        cmd_min = self._cmd_vector[idx, 0]
+        cmd_max = self._cmd_vector[idx, -1]
+        cmd_span = np.linspace(cmd_min, cmd_max, 10000)
+        pos_span = self._finter[idx](cmd_span)
+        # avro una sensibilita dell ordine di 1.e-4 in tensione,ok
+        pos_a = pos_span[pos_span <= pos].max()
+        pos_b = pos_span[pos_span >= pos].min()
+        idx_cmd_a = np.where(pos_span == pos_a)[0][0]
+        idx_cmd_b = np.where(pos_span == pos_b)[0][0]
+        x = [pos_b, pos_a]
+        y = [cmd_span[idx_cmd_b], cmd_span[idx_cmd_a]]
+        f = interp1d(x, y)
+        return float(f(pos))
 
     def save(self, fname):
         hdr = fits.Header()
