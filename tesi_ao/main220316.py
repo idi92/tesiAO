@@ -1308,9 +1308,9 @@ class TestRepeatedMeasures():
 
     def _analyze_measure(self, act_list, n_steps_volt_scan, Ntimes):
         '''
-        legge i file cplm relativi alle misure ripetute su ogni attuatote,
+        legge i file cplm relativi(vedi Gdrive: misure_ripetute) alle misure ripetute su ogni attuatote,
         calcola la media delle deflessioni ottenute per ciascun comando
-        in tensione applicato e le salva sul file fits che dovra essere
+        in tensione applicato e le salva sul file fits(vedi Gdrive: trm_mcl_all0 ) che dovra essere
         caricato da un oggetto mcl
         '''
         if act_list is None:
@@ -1336,22 +1336,24 @@ class TestRepeatedMeasures():
                 self._Ncpla_deflection[times,
                                        act_idx] = cpla._max_deflection[0]
         print('Mean deflections estimation...')
-        self._deflection_mean = np.zeros((n_acts, n_steps_volt_scan))
-        self._deflection_err = np.zeros((n_acts, n_steps_volt_scan))
-        for act_idx, act in enumerate(act_list):
-            print('Loading act#%d' % int(act))
-            for cmd_idx in np.arange(n_steps_volt_scan):
-                self._deflection_mean[act_idx, cmd_idx] = np.mean(
-                    self._Ncpla_deflection[:, act_idx, cmd_idx])
-                self._deflection_err[act_idx, cmd_idx] = np.std(
-                    self._Ncpla_deflection[:, act_idx, cmd_idx])
+        self._deflection_mean = self._Ncpla_deflection.mean(axis=0)
+        self._deflection_err = self._Ncpla_deflection.std(axis=0)
+        # self._deflection_mean = np.zeros((n_acts, n_steps_volt_scan))
+        # self._deflection_err = np.zeros((n_acts, n_steps_volt_scan))
+        # for act_idx, act in enumerate(act_list):
+        #     print('Loading act#%d' % int(act))
+        #     for cmd_idx in np.arange(n_steps_volt_scan):
+        #         self._deflection_mean[act_idx, cmd_idx] = np.mean(
+        #             self._Ncpla_deflection[:, act_idx, cmd_idx])
+        #         self._deflection_err[act_idx, cmd_idx] = np.std(
+        #             self._Ncpla_deflection[:, act_idx, cmd_idx])
         print('Creating mcl object...')
         self._mcl = MemsCommandLinearization(
             act_list, self._Ncpla_cmd_vector[0], self._deflection_mean, self._bmc.get_reference_shape_tag())
         # in realta e inutile perche poi devo fare il load e ricalcolare l
         # interpolazione
         self._mcl._create_interpolation_test()
-        self._mcl.save(self.fpath + 'mcl_all' + self.ffmt)
+        self._mcl.save(self.fpath + 'mcl_all0' + self.ffmt)
         print('mcl object saved!')
 
     def _collapse_all_measured_wfs(self, act_list, n_steps_volt_scan, Ntimes):
@@ -1359,6 +1361,7 @@ class TestRepeatedMeasures():
         vorrei legge i file cplm relativi alle misure ripetute su ogni attuatote,
         fare la media delle mappe ottunte per il dato act e cmd, in modo da salvare
         su file un solo wfmap per ogni act e comando       
+        fatto, ma escono mappe rumorose...
         '''
         if act_list is None:
             act_list = np.arange(self._bmc.get_number_of_actuators())
