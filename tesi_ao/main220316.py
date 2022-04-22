@@ -24,6 +24,7 @@ class CommandToPositionLinearizationMeasurer(object):
 
     NUMBER_WAVEFRONTS_TO_AVERAGE = 1
     NUMBER_STEPS_VOLTAGE_SCAN = 20
+    TIME_OUT = 10  # sec
 
     def __init__(self, interferometer, mems_deformable_mirror):
         self._interf = interferometer
@@ -36,7 +37,7 @@ class CommandToPositionLinearizationMeasurer(object):
             cmd = np.zeros(self._n_acts)
             self._bmc.set_shape(cmd)
             self._wfflat = self._interf.wavefront(
-                self.NUMBER_WAVEFRONTS_TO_AVERAGE)
+                self.NUMBER_WAVEFRONTS_TO_AVERAGE, timeout_in_sec=self.TIME_OUT)
         return self._wfflat
 
     def execute_command_scan(self, act_list=None):
@@ -89,7 +90,7 @@ class CommandToPositionLinearizationMeasurer(object):
 
     def _get_wavefront_flat_subtracted(self):
         dd = self._interf.wavefront(
-            self.NUMBER_WAVEFRONTS_TO_AVERAGE, timeout_in_sec=10) - self._get_zero_command_wavefront()
+            self.NUMBER_WAVEFRONTS_TO_AVERAGE, timeout_in_sec=self.TIME_OUT) - self._get_zero_command_wavefront()
         return dd - np.ma.median(dd)
 
     def _reset_flat_wavefront(self):
@@ -759,6 +760,7 @@ class ModeMeasurer():
     fnpath = 'prova/static_zernike_modes/'
     ffmt = '.png'
     AmpInNanometer = 100
+    TIME_OUT = 10  # s
 
     def __init__(self, interferometer, mems_deformable_mirror):
         self._interf = interferometer
@@ -774,14 +776,14 @@ class ModeMeasurer():
 
         expected_valid_points = (mg._pupil_mask == False).sum()
 
-        wfflat = self._interf.wavefront()
+        wfflat = self._interf.wavefront(timeout_in_sec=self.TIME_OUT)
         wfflat = np.ma.array(data=wfflat, mask=mg._pupil_mask)
         # avoid nasty wf maps
         measured_valid_points = (wfflat.mask == False).sum()
         ratio = measured_valid_points / expected_valid_points
         while(ratio < self.THRESHOLD_RATIO):
             print('Warning: Nasty map acquired!Reloading...')
-            wfflat = self._interf.wavefront()
+            wfflat = self._interf.wavefront(timeout_in_sec=self.TIME_OUT)
             wfflat = np.ma.array(data=wfflat, mask=mg._pupil_mask)
             measured_valid_points = (wfflat.mask == False).sum()
             ratio = measured_valid_points / expected_valid_points
@@ -802,7 +804,8 @@ class ModeMeasurer():
             #     cmd[act_list[idx]] = 0. - ref_cmd[act_list[idx]]
         self._bmc.set_shape(cmd)
         #_get_wavefront_flat_subtracted
-        wfflatsub = self._interf.wavefront() - wfflat
+        wfflatsub = self._interf.wavefront(
+            timeout_in_sec=self.TIME_OUT) - wfflat
         self._wfmeas = wfflatsub - np.ma.median(wfflatsub)
         self._wfmeas = np.ma.array(data=self._wfmeas, mask=mg._pupil_mask)
         # avoid nasty wf maps
@@ -810,7 +813,8 @@ class ModeMeasurer():
         ratio = measured_valid_points / expected_valid_points
         while(ratio < self.THRESHOLD_RATIO):
             print('Warning: Nasty map acquired!Reloading...')
-            wfflatsub = self._interf.wavefront() - wfflat
+            wfflatsub = self._interf.wavefront(
+                timeout_in_sec=self.TIME_OUT) - wfflat
             self._wfmeas = wfflatsub - np.ma.median(wfflatsub)
             self._wfmeas = np.ma.array(data=self._wfmeas, mask=mg._pupil_mask)
             measured_valid_points = (self._wfmeas.mask == False).sum()
@@ -1320,30 +1324,35 @@ class TestRepeatedMeasures():
         for times in np.arange(Ntimes):
             print('%dtimes:' % times)
             for act_idx, act in enumerate(act_list):
+                print('Loading act#%d from file' % int(act))
                 fname = self.fpath + \
                     'act%d' % int(act) + 'time%d' % times + self.ffmt
                 cpla = CommandToPositionLinearizationAnalyzer(fname)
                 cpla._compute_maximum_deflection()
-                #mcl = cpla.compute_linearization()
+                # print(cpla._cmd_vector.shape)
+                # loaded cpla._cmd_vector has(1,20) shape
                 self._Ncpla_cmd_vector[times,
-                                       act_idx] = cpla._cmd_vector[act_idx]
+                                       act_idx] = cpla._cmd_vector[0]
                 self._Ncpla_deflection[times,
-                                       act_idx] = cpla._max_deflection[act_idx]
-
+                                       act_idx] = cpla._max_deflection[0]
+        print('Mean deflections estimation...')
         self._deflection_mean = np.zeros((n_acts, n_steps_volt_scan))
         self._deflection_err = np.zeros((n_acts, n_steps_volt_scan))
         for act_idx, act in enumerate(act_list):
+            print('Loading act#%d' % int(act))
             for cmd_idx in np.arange(n_steps_volt_scan):
                 self._deflection_mean[act_idx, cmd_idx] = np.mean(
                     self._Ncpla_deflection[:, act_idx, cmd_idx])
                 self._deflection_err[act_idx, cmd_idx] = np.std(
                     self._Ncpla_deflection[:, act_idx, cmd_idx])
+        print('Creating mcl object...')
         self._mcl = MemsCommandLinearization(
-            act_list, cpla._cmd_vector, self._deflection_mean, self._bmc.get_reference_shape_tag())
+            act_list, self._Ncpla_cmd_vector[0], self._deflection_mean, self._bmc.get_reference_shape_tag())
         # in realta e inutile perche poi devo fare il load e ricalcolare l
         # interpolazione
         self._mcl._create_interpolation_test()
         self._mcl.save(self.fpath + 'mcl_all' + self.ffmt)
+        print('mcl object saved!')
 
     def _collapse_all_measured_wfs(self, act_list, n_steps_volt_scan, Ntimes):
         '''
@@ -1362,8 +1371,8 @@ class TestRepeatedMeasures():
             (Ntimes, n_steps_volt_scan, frame_shape[0], frame_shape[1]))
         self._collapsed_wfs = np.ma.zeros(
             (n_acts, n_steps_volt_scan, frame_shape[0], frame_shape[1]))
-        self._collapsed_sigma_wfs = np.ma.zeros(
-            (n_acts, n_steps_volt_scan, frame_shape[0], frame_shape[1]))
+        # self._collapsed_sigma_wfs = np.ma.zeros(
+        #     (n_acts, n_steps_volt_scan, frame_shape[0], frame_shape[1]))
 
         for act_idx, act in enumerate(act_list):
             for times in np.arange(Ntimes):
@@ -1372,13 +1381,16 @@ class TestRepeatedMeasures():
                 cpla = CommandToPositionLinearizationAnalyzer(fname)
                 for cmd_idx in np.arange(n_steps_volt_scan):
                     wfs_temp[times, cmd_idx] = cpla._wfs[act_idx, cmd_idx]
+            print('time to collapse!')
             for cmd_idx in np.arange(n_steps_volt_scan):
+                print('cmd_idx=%d' % cmd_idx)
                 for yi in np.arange(frame_shape[0]):
                     for xi in np.arange(frame_shape[1]):
                         self._collapsed_wfs[act_idx, cmd_idx, yi,
                                             xi] = wfs_temp[:, cmd_idx, yi, xi].mean()
-                        self._collapsed_sigma_wfs[act_idx, cmd_idx, yi,
-                                                  xi] = wfs_temp[:, cmd_idx, yi, xi].std()
+                        # self._collapsed_sigma_wfs[act_idx, cmd_idx, yi,
+                        # xi] = wfs_temp[:, cmd_idx, yi, xi].std()
+        print('collapsed!')
 
         cplm = CommandToPositionLinearizationMeasurer(self._interf, self._bmc)
         cplm.NUMBER_STEPS_VOLTAGE_SCAN = n_steps_volt_scan
@@ -1393,18 +1405,142 @@ class TestRepeatedMeasures():
         fname = self.fpath + 'cplm_all_mean' + self.ffmt
         cplm.save_results(fname)
 
-    def _plot_deflections_vs_cmd(self, act_list, Ntimes):
+    def _plot_deflections_vs_cmd(self, act, Ntimes):
 
-        act_list = np.array([act_list])
-        n_acts = len(act_list)
         plt.figure()
         plt.clf()
         for times in np.arange(Ntimes):
-            for act_idx, act in enumerate(act_list):
-                plt.plot(self._Ncpla_cmd_vector[times, act_idx], self._Ncpla_deflection[times,
-                                                                                        act_idx] / 1.e-9, 'o')
+            plt.plot(self._Ncpla_cmd_vector[times, act],
+                     self._Ncpla_deflection[times, act] / 1.e-9, 'o', label='%dtime' % times)
         plt.grid()
+        plt.legend(loc='best')
         plt.title('act=%d' % int(act))
+
+
+class InfluenceFunctionMeasurer():
+    ffmt = '.fits'
+    fpath = 'prova/misure_ifs/ifm_'
+    NUMBER_WAVEFRONTS_TO_AVERAGE = 1
+    NUMBER_STEPS_VOLTAGE_SCAN = 1
+    TIME_OUT = 10  # sec
+
+    def __init__(self, interferometer, mems_deformable_mirror):
+        self._interf = interferometer
+        self._bmc = mems_deformable_mirror
+        self._n_acts = self._bmc.get_number_of_actuators()
+        self._wfflat = None
+
+    def _get_zero_command_wavefront(self):
+        if self._wfflat is None:
+            cmd = np.zeros(self._n_acts)
+            self._bmc.set_shape(cmd)
+            self._wfflat = self._interf.wavefront(
+                self.NUMBER_WAVEFRONTS_TO_AVERAGE, timeout_in_sec=self.TIME_OUT)
+        return self._wfflat
+
+    def execute_ifs_measure(self, mcl, pos):
+
+        act_list = np.arange(self._n_acts)
+
+        self._actuators_list = np.array(act_list)
+        n_acts_to_meas = len(self._actuators_list)
+
+        wfflat = self._get_zero_command_wavefront()
+
+        self._reference_cmds = self._bmc.get_reference_shape()
+        self._reference_tag = self._bmc.get_reference_shape_tag()
+
+        self._cmd_vector = np.zeros((n_acts_to_meas,
+                                     self.NUMBER_STEPS_VOLTAGE_SCAN))
+
+        self._wfs = np.ma.zeros(
+            (n_acts_to_meas, self.NUMBER_STEPS_VOLTAGE_SCAN,
+             wfflat.shape[0], wfflat.shape[1]))
+
+        N_pixels = self._wfs.shape[2] * self._wfs.shape[3]
+        for act_idx, act in enumerate(self._actuators_list):
+            self._cmd_vector[act_idx] = mcl.linear_p2c(int(act), pos)
+            for cmd_idx, cmdi in enumerate(self._cmd_vector[act_idx]):
+                print("Act:%d - command %g" % (act, cmdi))
+                cmd = np.zeros(self._n_acts)
+                cmd[act] = cmdi
+                self._bmc.set_shape(cmd)
+                self._wfs[act_idx, cmd_idx, :,
+                          :] = self._get_wavefront_flat_subtracted()
+                masked_pixels = self._wfs[act_idx, cmd_idx].mask.sum()
+                masked_ratio = masked_pixels / N_pixels
+                if masked_ratio > 0.7829:
+                    print('Warning: Bad measure acquired for: act%d' %
+                          act_idx + ' cmd_idx %d' % cmd_idx)
+                    self._avoid_saturated_measures(
+                        masked_ratio, act_idx, cmd_idx, N_pixels)
+
+    def _avoid_saturated_measures(self, masked_ratio, act_idx, cmd_idx, N_pixels):
+
+        while masked_ratio > 0.7829:
+            self._wfs[act_idx, cmd_idx, :,
+                      :] = self._get_wavefront_flat_subtracted()
+            masked_pixels = self._wfs[act_idx, cmd_idx].mask.sum()
+            masked_ratio = masked_pixels / N_pixels
+
+        print('Repeated measure completed!')
+
+    def _get_wavefront_flat_subtracted(self):
+        dd = self._interf.wavefront(
+            self.NUMBER_WAVEFRONTS_TO_AVERAGE, timeout_in_sec=self.TIME_OUT) - self._get_zero_command_wavefront()
+        return dd - np.ma.median(dd)
+
+    def _reset_flat_wavefront(self):
+        self._wfflat = None
+
+    def check_mask_coverage(self, ratio=False):
+        masked_pixels = np.array([self._wfs[a, i].mask.sum() for a in range(
+            self._wfs.shape[0]) for i in range(self._wfs.shape[1])])
+        titlestr = 'Number'
+        if(ratio == True):
+            masked_pixels = masked_pixels / \
+                (self._wfs.shape[2] * self._wfs.shape[3])
+            titlestr = 'Fraction'
+        plt.figure()
+        plt.clf()
+        plt.ion()
+        plt.plot(masked_pixels)
+
+        plt.ylabel(titlestr + ' of Masked Pixels', size=25)
+        plt.xlabel('Measures', size=25)
+        plt.title('Number of scans per actuator:%d' %
+                  self._wfs.shape[1])
+
+    def add_repeated_measure(self, cplm_to_add, act_list):
+        for idx, act in enumerate(act_list):
+            self._wfs[act] = cplm_to_add._wfs[idx]
+
+    def save_results(self, fname):
+        hdr = fits.Header()
+        hdr['REF_TAG'] = self._reference_tag
+        hdr['N_AV_FR'] = self.NUMBER_WAVEFRONTS_TO_AVERAGE
+        fits.writeto(fname, self._wfs.data, hdr)
+        fits.append(fname, self._wfs.mask.astype(int))
+        fits.append(fname, self._cmd_vector)
+        fits.append(fname, self._actuators_list)
+        fits.append(fname, self._reference_cmds)
+
+    @staticmethod
+    def load(fname):
+        header = fits.getheader(fname)
+        hduList = fits.open(fname)
+        wfs_data = hduList[0].data
+        wfs_mask = hduList[1].data.astype(bool)
+        wfs = np.ma.masked_array(data=wfs_data, mask=wfs_mask)
+        cmd_vector = hduList[2].data
+        actuators_list = hduList[3].data
+        reference_commands = hduList[4].data
+        return {'wfs': wfs,
+                'cmd_vector': cmd_vector,
+                'actuators_list': actuators_list,
+                'reference_shape': reference_commands,
+                'reference_shape_tag': header['REF_TAG']
+                }
 
 
 class PixelRuler():
