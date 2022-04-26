@@ -93,7 +93,7 @@ class CommandToPositionLinearizationMeasurer(object):
             self.NUMBER_WAVEFRONTS_TO_AVERAGE, timeout_in_sec=self.TIME_OUT) - self._get_zero_command_wavefront()
         return dd - np.ma.median(dd)
 
-    def _reset_flat_wavefront(self):
+    def reset_flat_wavefront(self):
         self._wfflat = None
 
     def check_mask_coverage(self, ratio=False):
@@ -332,27 +332,46 @@ class MemsCommandLinearization():
         self._reference_shape_tag = reference_shape_tag
         # TODO: dopo aver aggiustato tutto mettere fint giusta
         # self._create_interpolation_test()
-        self._create_interpolation()
+        self._create_interpolation_test()
+        self._create_calibration_curves()
 
-    def _create_interpolation(self):
-        # WARNING: interp 1d suppone che l argomento sia un array
-        # di valori monotonicamente crescenti(o comunque li riordina) e
-        # le deflessioni non lo sono, per questo motivo in
-        # plot_interpolated_functions osservo delle forti oscillazioni
-        self._finter = [interp1d(
-            self._deflection[i], self._cmd_vector[i], kind='cubic')
-            for i in range(self._cmd_vector.shape[0])]
+    # def _create_interpolation(self):
+    #     # WARNING: interp 1d suppone che l argomento sia un array
+    #     # di valori monotonicamente crescenti(o comunque li riordina) e
+    #     # le deflessioni non lo sono, per questo motivo in
+    #     # plot_interpolated_functions osservo delle forti oscillazioni
+    #     self._finter = [interp1d(
+    #         self._deflection[i], self._cmd_vector[i], kind='cubic')
+    #         for i in range(self._cmd_vector.shape[0])]
 
     def _create_interpolation_test(self):
         self._finter = [CubicSpline(self._cmd_vector[i], self._deflection[i], bc_type='natural')
                         for i in range(self._cmd_vector.shape[0])]
 
+    def _create_calibration_curves(self):
+        '''
+        Generates actuator deflections and cmds spans
+        from the interpolated functions
+        '''
+        # avro una sensibilita dell ordine di 1.e-4 in tensione,ok
+        self._calibration_points = 10000
+        self._calibrated_position = np.zeros(
+            (len(self._actuators_list), self._calibration_points))
+        self._calibrated_cmd = np.zeros_like(self._calibrated_position)
+        for idx, act in enumerate(self._actuators_list):
+            cmd_min = self._cmd_vector[idx, 0]
+            cmd_max = self._cmd_vector[idx, -1]
+            self._calibrated_cmd[idx] = np.linspace(
+                cmd_min, cmd_max, self._calibration_points)
+            self._calibrated_position[idx] = self._finter[idx](
+                self._calibrated_cmd[idx])
+
     def _get_act_idx(self, act):
         return np.argwhere(self._actuators_list == act)[0][0]
 
-    def p2c(self, act, p):
-        idx = self._get_act_idx(act)
-        return self._finter[idx](p)
+    # def p2c(self, act, p):
+    #     idx = self._get_act_idx(act)
+    #     return self._finter[idx](p)
 
     def solve_p2c(self, act, p):
         '''
@@ -378,22 +397,26 @@ class MemsCommandLinearization():
         close to pos and returns the required cmd
         should be faster then solve_p2c
         '''
-        # certo se ricreo ogni volta cmd_span e
-        # pos_span per ogni act forse sara piu lento
         idx = self._get_act_idx(act)
-        cmd_min = self._cmd_vector[idx, 0]
-        cmd_max = self._cmd_vector[idx, -1]
-        cmd_span = np.linspace(cmd_min, cmd_max, 10000)
-        pos_span = self._finter[idx](cmd_span)
+        cmd_span = self._calibrated_cmd[idx]
+        pos_span = self._calibrated_position[idx]
         # avro una sensibilita dell ordine di 1.e-4 in tensione,ok
         pos_a = pos_span[pos_span <= pos].max()
         pos_b = pos_span[pos_span >= pos].min()
+        # nel caso di funz biunivoca, viene scelto un
+        # punto corrispondente a pos, ma non so quale
+        # ma la coppia di indici è corretta
         idx_cmd_a = np.where(pos_span == pos_a)[0][0]
         idx_cmd_b = np.where(pos_span == pos_b)[0][0]
         x = [pos_b, pos_a]
         y = [cmd_span[idx_cmd_b], cmd_span[idx_cmd_a]]
         f = interp1d(x, y)
         return float(f(pos))
+
+    def easy_p2c(self):
+        idx = self._get_act_idx(act)
+        cmd_span = self._calibrated_cmd[idx]
+        pos_span = self._calibrated_position[idx]
 
     def save(self, fname):
         hdr = fits.Header()
@@ -768,12 +791,15 @@ class ModeMeasurer():
 
     def execute_measure(self, mcl, mg, pos=None):
         if pos is None:
+            print('qui1!')
             pos = mg.get_position_cmds_from_wf()
 
         flat_cmd = np.zeros(self._bmc.get_number_of_actuators())
+        print('qui!2')
         self._bmc.set_shape(flat_cmd)
+        print('qui!3')
         ref_cmd = self._bmc.get_reference_shape()
-
+        print('qui!4')
         expected_valid_points = (mg._pupil_mask == False).sum()
 
         wfflat = self._interf.wavefront(timeout_in_sec=self.TIME_OUT)
@@ -792,7 +818,7 @@ class ModeMeasurer():
         cmd = np.zeros(self._bmc.get_number_of_actuators())
         # TODO: clip voltage!
         for idx in range(len(pos)):
-            cmd[act_list[idx]] = mcl.p2c(act_list[idx], pos[idx])
+            cmd[act_list[idx]] = mcl.linear_p2c(act_list[idx], pos[idx])
             # giustamente se clippo in tensione...
             # ValueError: A value in x_new is above the interpolation range.
             # volt_control = cmd[act_list[idx]] + ref_cmd[act_list[idx]]
@@ -1301,6 +1327,7 @@ class TestRepeatedMeasures():
             print('Repeated measures for act%d' % int(act))
             for times in np.arange(Ntimes):
                 print('%dtimes:' % times)
+                cplm.reset_flat_wavefront()
                 cplm.execute_command_scan([int(act)])
                 fname = self.fpath + \
                     'act%d' % int(act) + 'time%d' % times + self.ffmt
@@ -1308,7 +1335,7 @@ class TestRepeatedMeasures():
 
     def _analyze_measure(self, act_list, n_steps_volt_scan, Ntimes):
         '''
-        legge i file cplm relativi(vedi Gdrive: misure_ripetute) alle misure ripetute su ogni attuatote,
+        legge i file cplm relativi(vedi Gdrive: misure_ripetute) alle misure ripetute su ogni attuatore,
         calcola la media delle deflessioni ottenute per ciascun comando
         in tensione applicato e le salva sul file fits(vedi Gdrive: trm_mcl_all0 ) che dovra essere
         caricato da un oggetto mcl
