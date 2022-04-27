@@ -8,7 +8,7 @@ from scipy.interpolate._cubic import CubicSpline
 
 from functools import reduce
 import matplotlib.pyplot as plt
-from scipy.optimize import curve_fit, fsolve
+from scipy.optimize import fsolve
 from numpy import dtype
 from arte.types.mask import CircularMask
 from arte.utils.zernike_generator import ZernikeGenerator
@@ -402,7 +402,7 @@ class MemsCommandLinearization():
         pos_span = self._calibrated_position[idx]
         # avro una sensibilita dell ordine di 1.e-4 in tensione,ok
         pos_a = pos_span[pos_span <= pos].max()
-        pos_b = pos_span[pos_span >= pos].min()
+        pos_b = pos_span[pos_span > pos].min()
         # nel caso di funz biunivoca, viene scelto un
         # punto corrispondente a pos, ma non so quale
         # ma la coppia di indici è corretta
@@ -413,10 +413,22 @@ class MemsCommandLinearization():
         f = interp1d(x, y)
         return float(f(pos))
 
-    def easy_p2c(self):
+    def sampled_p2c(self, act, pos):
+        '''
+        for a given pos, returns the cmd relative to the closest
+        stroke to pos
+        '''
         idx = self._get_act_idx(act)
         cmd_span = self._calibrated_cmd[idx]
         pos_span = self._calibrated_position[idx]
+        pos_a = pos_span[pos_span <= pos].max()
+        pos_b = pos_span[pos_span > pos].min()
+        if(abs(pos - pos_a) > abs(pos - pos_b)):
+            pos_c = pos_b
+        else:
+            pos_c = pos_a
+        idx_cmd = np.where(pos_span == pos_c)[0][0]
+        return cmd_span[idx_cmd]
 
     def save(self, fname):
         hdr = fits.Header()
@@ -618,6 +630,12 @@ class PupilMaskBuilder():
 
 
 # da provare sul file cplm_all_fixed fatto il 17/3
+def _do_it_wrong():
+    a = np.ones(5)
+    for i in range(10):
+        a[i] = 1
+    return a
+
 
 class ModeGenerator():
 
@@ -791,15 +809,11 @@ class ModeMeasurer():
 
     def execute_measure(self, mcl, mg, pos=None):
         if pos is None:
-            print('qui1!')
             pos = mg.get_position_cmds_from_wf()
 
         flat_cmd = np.zeros(self._bmc.get_number_of_actuators())
-        print('qui!2')
         self._bmc.set_shape(flat_cmd)
-        print('qui!3')
-        ref_cmd = self._bmc.get_reference_shape()
-        print('qui!4')
+        #ref_cmd = self._bmc.get_reference_shape()
         expected_valid_points = (mg._pupil_mask == False).sum()
 
         wfflat = self._interf.wavefront(timeout_in_sec=self.TIME_OUT)
