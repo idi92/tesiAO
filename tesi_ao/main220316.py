@@ -405,7 +405,7 @@ class MemsCommandLinearization():
         pos_b = pos_span[pos_span > pos].min()
         # nel caso di funz biunivoca, viene scelto un
         # punto corrispondente a pos, ma non so quale
-        # ma la coppia di indici è corretta
+        # ma la coppia di indici e corretta
         idx_cmd_a = np.where(pos_span == pos_a)[0][0]
         idx_cmd_b = np.where(pos_span == pos_b)[0][0]
         x = [pos_b, pos_a]
