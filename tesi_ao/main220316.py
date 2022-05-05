@@ -65,7 +65,7 @@ class CommandToPositionLinearizationMeasurer(object):
         self._wfs = np.ma.zeros(
             (n_acts_to_meas, self.NUMBER_STEPS_VOLTAGE_SCAN,
              wfflat.shape[0], wfflat.shape[1]))
-        self._wfs_flat = np.ma.zeros(
+        self._acquired_wfflat = np.ma.zeros(
             (n_acts_to_meas, wfflat.shape[0], wfflat.shape[1]))
 
         N_pixels = self._wfs.shape[2] * self._wfs.shape[3]
@@ -468,33 +468,6 @@ class MemsCommandLinearization():
         reference_shape_tag = header['REF_TAG']
         return MemsCommandLinearization(
             actuators_list, cmd_vector, deflection, reference_shape_tag)
-
-
-def main220228():
-    mcl = MemsCommandLinearization.load('/tmp/mcl9.fits')
-    print('reference shape used when calibrating %s ' %
-          mcl._reference_shape_tag)
-    actuator_number = 63
-    deflection_wrt_reference_shape = 100e-9
-    mcl.p2c(actuator_number, deflection_wrt_reference_shape)
-
-
-def main_calibration(wyko,
-                     bmc,
-                     mcl_fname='/tmp/mcl0.fits',
-                     scan_fname='/tmp/cpl0.fits',
-                     act_list=None):
-    #wyko, bmc = create_devices()
-    cplm = CommandToPositionLinearizationMeasurer(wyko, bmc)
-
-    if act_list is None:
-        act_list = np.arange(bmc.get_number_of_actuators())
-    cplm.execute_command_scan(act_list)
-    cplm.save_results(scan_fname)
-    cpla = CommandToPositionLinearizationAnalyzer(scan_fname)
-    mcl = cpla.compute_linearization()
-    mcl.save(mcl_fname)
-    return mcl, cplm, cpla
 
 
 # def plot_interpolated_function(mcl):
@@ -1420,7 +1393,13 @@ class InfluenceFunctionMeasurer():
     NUMBER_WAVEFRONTS_TO_AVERAGE = 1
     NUMBER_STEPS_VOLTAGE_SCAN = 1
     TIME_OUT = 10  # sec
-    REASONABLE_MASKED_PIXELS_RATIO = 0.7829
+    # use nasty_pixes_ratio.py if u changed the detector
+    # mask on 4sight and get a reasonable
+    # masked pixel ratio to ctrl and
+    # and avoid nasty maps
+    # rectangular old mask 0.7829
+    # circular new mask 0.8218
+    REASONABLE_MASKED_PIXELS_RATIO = 0.8218
 
     def __init__(self, interferometer, mems_deformable_mirror):
         self._interf = interferometer
@@ -1454,6 +1433,8 @@ class InfluenceFunctionMeasurer():
         self._wfs = np.ma.zeros(
             (n_acts_to_meas, self.NUMBER_STEPS_VOLTAGE_SCAN,
              wfflat.shape[0], wfflat.shape[1]))
+        self._acquired_wfflat = np.ma.zeros(
+            (n_acts_to_meas, wfflat.shape[0], wfflat.shape[1]))
 
         N_pixels = self._wfs.shape[2] * self._wfs.shape[3]
         for act_idx, act in enumerate(self._actuators_list):
@@ -1472,6 +1453,8 @@ class InfluenceFunctionMeasurer():
                           act_idx + ' cmd_idx %d' % cmd_idx)
                     self._avoid_saturated_measures(
                         masked_ratio, act_idx, cmd_idx, N_pixels)
+            self._acquired_wfflat[act_idx] = self._wfflat
+            self._reset_flat_wavefront()
 
     def _avoid_saturated_measures(self, masked_ratio, act_idx, cmd_idx, N_pixels):
 
@@ -1509,10 +1492,6 @@ class InfluenceFunctionMeasurer():
         plt.title('Number of scans per actuator:%d' %
                   self._wfs.shape[1])
 
-    def add_repeated_measure(self, cplm_to_add, act_list):
-        for idx, act in enumerate(act_list):
-            self._wfs[act] = cplm_to_add._wfs[idx]
-
     def save_results(self, fname):
         hdr = fits.Header()
         hdr['REF_TAG'] = self._reference_tag
@@ -1522,6 +1501,7 @@ class InfluenceFunctionMeasurer():
         fits.append(fname, self._cmd_vector)
         fits.append(fname, self._actuators_list)
         fits.append(fname, self._reference_cmds)
+        fits.append(fname, self._acquired_wfflat)
 
     @staticmethod
     def load(fname):
@@ -1533,6 +1513,13 @@ class InfluenceFunctionMeasurer():
         cmd_vector = hduList[2].data
         actuators_list = hduList[3].data
         reference_commands = hduList[4].data
+        # wfs_flat_data = hduList[5].data
+        # wfs_flat_mask = hduList[6].data.astype(bool)
+        # wfs_flat = np.ma.masked_array(data=wfs_flat_data, mask=wfs_flat_mask)
+        # TODO: aggiungere try
+        # in modo da poter caricare sia i file cplm
+        # nuovi con le misure di flat e quelli vecchi
+        # senza misure di flat
         return {'wfs': wfs,
                 'cmd_vector': cmd_vector,
                 'actuators_list': actuators_list,
