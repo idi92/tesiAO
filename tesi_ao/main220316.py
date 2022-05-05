@@ -25,6 +25,13 @@ class CommandToPositionLinearizationMeasurer(object):
     NUMBER_WAVEFRONTS_TO_AVERAGE = 1
     NUMBER_STEPS_VOLTAGE_SCAN = 20
     TIME_OUT = 10  # sec
+    # use nasty_pixes_ratio.py if u changed the detector
+    # mask on 4sight and get a reasonable
+    # masked pixel ratio to ctrl and
+    # and avoid nasty maps
+    # rectangular old mask 0.7829
+    # circular new mask 0.8218
+    REASONABLE_MASKED_PIXELS_RATIO = 0.8218
 
     def __init__(self, interferometer, mems_deformable_mirror):
         self._interf = interferometer
@@ -72,7 +79,7 @@ class CommandToPositionLinearizationMeasurer(object):
                           :] = self._get_wavefront_flat_subtracted()
                 masked_pixels = self._wfs[act_idx, cmd_idx].mask.sum()
                 masked_ratio = masked_pixels / N_pixels
-                if masked_ratio > 0.7829:
+                if masked_ratio > self.REASONABLE_MASKED_PIXELS_RATIO:
                     print('Warning: Bad measure acquired for: act%d' %
                           act_idx + ' cmd_idx %d' % cmd_idx)
                     self._avoid_saturated_measures(
@@ -80,7 +87,7 @@ class CommandToPositionLinearizationMeasurer(object):
 
     def _avoid_saturated_measures(self, masked_ratio, act_idx, cmd_idx, N_pixels):
 
-        while masked_ratio > 0.7829:
+        while masked_ratio > self.REASONABLE_MASKED_PIXELS_RATIO:
             self._wfs[act_idx, cmd_idx, :,
                       :] = self._get_wavefront_flat_subtracted()
             masked_pixels = self._wfs[act_idx, cmd_idx].mask.sum()
@@ -402,7 +409,7 @@ class MemsCommandLinearization():
         pos_span = self._calibrated_position[idx]
         # avro una sensibilita dell ordine di 1.e-4 in tensione,ok
         pos_a = pos_span[pos_span <= pos].max()
-        pos_b = pos_span[pos_span > pos].min()
+        pos_b = pos_span[pos_span >= pos].min()
         # nel caso di funz biunivoca, viene scelto un
         # punto corrispondente a pos, ma non so quale
         # ma la coppia di indici e corretta
@@ -422,7 +429,7 @@ class MemsCommandLinearization():
         cmd_span = self._calibrated_cmd[idx]
         pos_span = self._calibrated_position[idx]
         pos_a = pos_span[pos_span <= pos].max()
-        pos_b = pos_span[pos_span > pos].min()
+        pos_b = pos_span[pos_span >= pos].min()
         if(abs(pos - pos_a) > abs(pos - pos_b)):
             pos_c = pos_b
         else:
@@ -476,24 +483,24 @@ def main_calibration(wyko,
     return mcl, cplm, cpla
 
 
-def plot_interpolated_function(mcl):
-    '''
-    F_int(pos)=cmd
-    '''
-    plt.figure()
-    plt.clf()
-    for idx, act in enumerate(mcl._actuators_list):
-        a = np.min(mcl._deflection[act])
-        b = np.max(mcl._deflection[act])
-        xx = np.linspace(a, b, 1000)
-        plt.plot(mcl._finter[act](xx), xx / 1.e-9, '.-')
-    plt.xlabel('Command [au]', size=25)
-    plt.ylabel('Deflection [nm]', size=25)
-    plt.title('Calibration curve per actuator', size=25)
-    plt.grid()
+# def plot_interpolated_function(mcl):
+#     '''
+#     F_int(pos)=cmd
+#     '''
+#     plt.figure()
+#     plt.clf()
+#     for idx, act in enumerate(mcl._actuators_list):
+#         a = np.min(mcl._deflection[act])
+#         b = np.max(mcl._deflection[act])
+#         xx = np.linspace(a, b, 1000)
+#         plt.plot(mcl._finter[act](xx), xx / 1.e-9, '.-')
+#     plt.xlabel('Command [au]', size=25)
+#     plt.ylabel('Deflection [nm]', size=25)
+#     plt.title('Calibration curve per actuator', size=25)
+#     plt.grid()
 
 
-def plot_acquired_measures(mcl):
+def _plot_acquired_measures(mcl):
     plt.figure()
     plt.clf()
     for idx, act in enumerate(mcl._actuators_list):
@@ -504,23 +511,23 @@ def plot_acquired_measures(mcl):
     plt.grid()
 
 
-def plot_single_curve(mcl, act):
-    '''
-    F_int(pos)=cmd
-    '''
-    plt.figure()
-    plt.clf()
-    a = np.min(mcl._deflection[act])
-    b = np.max(mcl._deflection[act])
-    xx = np.linspace(a, b, 1000)
-    plt.plot(mcl._cmd_vector[act], mcl._deflection[act] /
-             1.e-9, 'or', label='sampling points')
-    plt.plot(mcl._finter[act](xx), xx / 1.e-9, '-', label='finter')
-    plt.title('Calibration Curve: act#%d' % act, size=25)
-    plt.xlabel('Commands [au]', size=25)
-    plt.ylabel('Deflection [nm]', size=25)
-    plt.grid()
-    plt.legend(loc='best')
+# def plot_single_curve(mcl, act):
+#     '''
+#     F_int(pos)=cmd
+#     '''
+#     plt.figure()
+#     plt.clf()
+#     a = np.min(mcl._deflection[act])
+#     b = np.max(mcl._deflection[act])
+#     xx = np.linspace(a, b, 1000)
+#     plt.plot(mcl._cmd_vector[act], mcl._deflection[act] /
+#              1.e-9, 'or', label='sampling points')
+#     plt.plot(mcl._finter[act](xx), xx / 1.e-9, '-', label='finter')
+#     plt.title('Calibration Curve: act#%d' % act, size=25)
+#     plt.xlabel('Commands [au]', size=25)
+#     plt.ylabel('Deflection [nm]', size=25)
+#     plt.grid()
+#     plt.legend(loc='best')
 
 
 def _plot_pos_vs_cmd(mcl, act):
@@ -728,7 +735,7 @@ class ModeGenerator():
         self._wfmode = self._wfmode * AmpInMeters
 
     def generate_tilt(self):
-        self._wfmode = np.tile(np.linspace(-100e-9, 100e-9, 640), (486, 1))
+        self._wfmode = np.tile(np.linspace(-100.e-9, 100.e-9, 640), (486, 1))
         self._wfmode = np.ma.array(data=self._wfmode, mask=self._pupil_mask)
 
     def get_position_cmds_from_wf(self, wfmap=None):
@@ -831,8 +838,12 @@ class ModeMeasurer():
         act_list = mg._acts_in_pupil
         cmd = np.zeros(self._bmc.get_number_of_actuators())
         # TODO: clip voltage!
-        for idx in range(len(pos)):
-            cmd[act_list[idx]] = mcl.linear_p2c(act_list[idx], pos[idx])
+        assert len(act_list) == len(
+            pos), "Error: act_list and pos must have the same shape!"
+        for idx, act in enumerate(act_list):
+            cmd[int(act)] = mcl.linear_p2c(int(act), pos[idx])
+        # for idx in range(len(pos)):
+            # cmd[act_list[idx]] = mcl.linear_p2c(act_list[idx], pos[idx])
             # giustamente se clippo in tensione...
             # ValueError: A value in x_new is above the interpolation range.
             # volt_control = cmd[act_list[idx]] + ref_cmd[act_list[idx]]
@@ -957,6 +968,7 @@ class SuitableActuatorsInPupilAnalyzer():
     # determinare la lista degli attuatori/threshold che minimizzano il fitting error osservato
     # dei modi che si vogliono generare
     # to be continued...
+    # white spectra
 
     THRESHOLD_SPAN = np.array([0.01, 0.1, 0.2, 0.3, 0.4, 0.5])
     Aj_SPAN = 100.e-9 * np.arange(1, 6)  # meters
@@ -1212,71 +1224,6 @@ class _test_saipa_load():
             plt.grid()
 
 
-def provarec(cpla, mcl):
-    # maschera intersezione di tutte le maschere delle wf map misurate
-    imask = reduce(lambda a, b: np.ma.mask_or(a, b), cpla._wfs[:, 13].mask)
-
-    # normalizzo la mappa di fase dell'attuatore act a max==1
-    # scelgo il comando 13: è una deformata di circa 500nm (quindi ben sopra al
-    # rumore dell'interferometro)
-    # e non troppo grossa da saturare l'interferometro: per tutti i 140
-    # attuatori la mappa del comando 13 non presenta "buchi"
-    #
-    # la funzione ritorna un vettore contenente i valori del wf nei punti
-    # dentro la maschera imask
-    def normalizeif(act):
-        return (cpla._wfs[act, 13][imask == False] / mcl._deflection[act, 13]).data
-
-    # creo una "matrice di interazione" giustapponendo in colonna i vettori
-    # normalizzati
-    im = np.column_stack([normalizeif(i) for i in cpla._actuators_list])
-
-    # pseudo inversa della matrice di interazione
-    rec = np.linalg.pinv(im)
-
-    # questo prodotto matriciale fra rec e una mappa di fase qualsiasi restituisce
-    # le 140 posizioni in cui comandare gli attuatori per ottenere wfmap
-    def wf2pos(wfmap):
-        return np.dot(rec, wfmap[imask == False])
-
-    # creo un tilt (da -100 a 100nm lungo ogni riga, tutte le righe sono uguali
-    wftilt = np.tile(np.linspace(-100e-9, 100e-9, 640), (486, 1))
-    # lo converto in masked_array per coerenza col resto
-    wftilt = np.ma.array(data=wftilt, mask=imask)
-
-    # postilt è il comando da dare agli attuatori per ottenere wftilt
-    postilt = wf2pos(wftilt)
-    # bisognerebbe controllare che nessun elemento sia troppo grande,
-    # altrimenti lo specchio non riesce a fare la deformata richiesta
-
-    # wffitted è la mappa di fase che mi aspetto di ottenere davvero:
-    # è il miglior fit che lo specchio riesce a fare di wftilt
-    wffitted = np.zeros((cpla._wfs.shape[2], cpla._wfs.shape[3]))
-    wffitted[imask == False] = np.dot(im, postilt)
-    wffitted = np.ma.array(data=wffitted, mask=imask)
-
-    print("mode amplitude: %g nm rms " % wftilt.std())
-    fitting_error = (wffitted - wftilt).std()
-    print("fitting error: %g nm rms " % fitting_error)
-
-    # posso rifarlo con un modo ad alta frequenza (tipo un seno che oscilla 15
-    # volte in 640 px)
-    wfsin = np.tile(100e-9 * np.sin(2 * np.pi / 43 * np.arange(640)), (486, 1))
-    wfsin = np.ma.array(data=wfsin, mask=imask)
-
-    possin = wf2pos(wfsin)
-
-    sinfitted = np.zeros((486, 640))
-    sinfitted[imask == False] = np.dot(im, possin)
-    sinfitted = np.ma.array(data=sinfitted, mask=imask)
-
-    # il fitting error su questo modo è 2nm rms
-    fitting_error_sin = (sinfitted - wfsin).std()
-
-    print("mode amplitude sin: %g nm rms " % wfsin.std())
-    print("fitting error: %g nm rms " % fitting_error_sin)
-
-
 class TestSvd():
 
     def __init__(self, mg):
@@ -1356,10 +1303,15 @@ class TestRepeatedMeasures():
         '''
         if act_list is None:
             act_list = np.arange(self._bmc.get_number_of_actuators())
-        else:
+            n_acts = len(act_list)
+        if type(act_list) == int:
             act_list = np.array([act_list])
+            n_acts = 1
+        if type(act_list) == np.ndarray:
+            act_list = np.array(act_list)
+            n_acts = len(act_list)
 
-        n_acts = len(act_list)
+        #n_acts = len(act_list)
         self._Ncpla_cmd_vector = np.zeros((Ntimes, n_acts, n_steps_volt_scan))
         self._Ncpla_deflection = np.zeros((Ntimes, n_acts, n_steps_volt_scan))
         for times in np.arange(Ntimes):
@@ -1467,6 +1419,7 @@ class InfluenceFunctionMeasurer():
     NUMBER_WAVEFRONTS_TO_AVERAGE = 1
     NUMBER_STEPS_VOLTAGE_SCAN = 1
     TIME_OUT = 10  # sec
+    REASONABLE_MASKED_PIXELS_RATIO = 0.7829
 
     def __init__(self, interferometer, mems_deformable_mirror):
         self._interf = interferometer
@@ -1513,7 +1466,7 @@ class InfluenceFunctionMeasurer():
                           :] = self._get_wavefront_flat_subtracted()
                 masked_pixels = self._wfs[act_idx, cmd_idx].mask.sum()
                 masked_ratio = masked_pixels / N_pixels
-                if masked_ratio > 0.7829:
+                if masked_ratio > self.REASONABLE_MASKED_PIXELS_RATIO:
                     print('Warning: Bad measure acquired for: act%d' %
                           act_idx + ' cmd_idx %d' % cmd_idx)
                     self._avoid_saturated_measures(
@@ -1521,7 +1474,7 @@ class InfluenceFunctionMeasurer():
 
     def _avoid_saturated_measures(self, masked_ratio, act_idx, cmd_idx, N_pixels):
 
-        while masked_ratio > 0.7829:
+        while masked_ratio > self.REASONABLE_MASKED_PIXELS_RATIO:
             self._wfs[act_idx, cmd_idx, :,
                       :] = self._get_wavefront_flat_subtracted()
             masked_pixels = self._wfs[act_idx, cmd_idx].mask.sum()
