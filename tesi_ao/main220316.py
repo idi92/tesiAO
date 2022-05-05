@@ -65,6 +65,8 @@ class CommandToPositionLinearizationMeasurer(object):
         self._wfs = np.ma.zeros(
             (n_acts_to_meas, self.NUMBER_STEPS_VOLTAGE_SCAN,
              wfflat.shape[0], wfflat.shape[1]))
+        self._wfs_flat = np.ma.zeros(
+            (n_acts_to_meas, wfflat.shape[0], wfflat.shape[1]))
 
         N_pixels = self._wfs.shape[2] * self._wfs.shape[3]
         for act_idx, act in enumerate(self._actuators_list):
@@ -84,6 +86,8 @@ class CommandToPositionLinearizationMeasurer(object):
                           act_idx + ' cmd_idx %d' % cmd_idx)
                     self._avoid_saturated_measures(
                         masked_ratio, act_idx, cmd_idx, N_pixels)
+            self._acquired_wfflat[act_idx] = self._wfflat
+            self.reset_flat_wavefront()
 
     def _avoid_saturated_measures(self, masked_ratio, act_idx, cmd_idx, N_pixels):
 
@@ -134,6 +138,7 @@ class CommandToPositionLinearizationMeasurer(object):
         fits.append(fname, self._cmd_vector)
         fits.append(fname, self._actuators_list)
         fits.append(fname, self._reference_cmds)
+        fits.append(fname, self._acquired_wfflat)
 
     @staticmethod
     def load(fname):
@@ -145,6 +150,13 @@ class CommandToPositionLinearizationMeasurer(object):
         cmd_vector = hduList[2].data
         actuators_list = hduList[3].data
         reference_commands = hduList[4].data
+        # wfs_flat_data = hduList[5].data
+        # wfs_flat_mask = hduList[6].data.astype(bool)
+        # wfs_flat = np.ma.masked_array(data=wfs_flat_data, mask=wfs_flat_mask)
+        # TODO: aggiungere try
+        # in modo da poter caricare sia i file cplm
+        # nuovi con le misure di flat e quelli vecchi
+        # senza misure di flat
         return {'wfs': wfs,
                 'cmd_vector': cmd_vector,
                 'actuators_list': actuators_list,
@@ -162,6 +174,8 @@ class CommandToPositionLinearizationAnalyzer(object):
         self._actuators_list = res['actuators_list']
         self._reference_shape_tag = res['reference_shape_tag']
         self._n_steps_voltage_scan = self._wfs.shape[1]
+        # TODO: aggiungere try per caricare le misure del wf_flat
+        # dal file nel caso le possieda o meno
 
     # def _max_wavefront(self, act_idx, cmd_index):
     #     wf = self._wfs[act_idx, cmd_index]
@@ -572,13 +586,6 @@ class PupilMaskBuilder():
         mask = CircularMask(self._wfmask.shape,
                             maskRadius=radius, maskCenter=center)
         return mask  # .mask()
-    # TODO: provare ad ottenere la stessa maschera circolare usando
-    # get_circular_mask e get_centered_circular_mask
-    # la cmask che uso, e l'unica che funziona, ha
-    # r_pix=120 e yc,xc=(240,308) che sono le coord del baricentro
-    # ottenuto da quello degli attuatori al centro[63,64,75,76]
-    # che sono diverse dalle cord del pixel centrale della parte di maschera a
-    # False di imask==wfmask!
 
     def get_centred_circular_mask_wrt_interferometer_mask(self):
         # TODO: controllare che i dati a False siano una mappa rettangolare
@@ -599,41 +606,35 @@ class PupilMaskBuilder():
 
         return cmask
 
+    def get_barycenter_of_false_pixels(self):
+        N_of_pixels = self._wfmask.shape[0] * self._wfmask.shape[1]
+        True_pixels = self._wfmask.sum()
+        False_pixels = N_of_pixels - True_pixels
+        coord_yi = np.where(self._wfmask == False)[0]
+        coord_xi = np.where(self._wfmask == False)[1]
+        yc = coord_yi.sum() / float(False_pixels)
+        xc = coord_xi.sum() / float(False_pixels)
+        return yc, xc
+
+    def get_number_of_false_pixels_along_barycenter_axis(self):
+        y, x = self.get_barycenter_of_false_pixels()
+        y = int(y)
+        x = int(x)
+        n_pixels_along_x = (self._wfmask[y, :] == False).sum()
+        n_pixels_along_y = (self._wfmask[:, x] == False).sum()
+        return n_pixels_along_y, n_pixels_along_x
+
+    def get_number_of_false_pixels_along_frame_axis(self):
+        n_pixels_along_x_axis = np.zeros(
+            self._wfmask.shape[1])  # shape[1]== len(y_axis)
+        n_pixels_along_y_axis = np.zeros(
+            self._wfmask.shape[0])  # shape[0]== len(x_axis)
+        n_pixels_along_x_axis = (self._wfmask == False).sum(axis=1)
+        n_pixels_along_y_axis = (self._wfmask == False).sum(axis=0)
+        return n_pixels_along_y_axis, n_pixels_along_x_axis
+
     def build_max_radius_and_pupil_in_imask(self):
         self._max_radius_in_imask, self._max_pupil_in_imask = self.get_centred_circular_mask_wrt_interferometer_mask()
-
-    def _get_centered_circular_mask(self):
-        '''
-        centered wrt the intersection mask
-        '''
-        circular_mask = self._wfmask
-        # center pixel coord of the full map
-        central_ypix = self._wfmask.shape[0] // 2
-        central_xpix = self._wfmask.shape[1] // 2
-        # questo supponendo che il pixel centrale di tutto
-        # il frame sia compreso dei dati a False...
-        assert self._wfmask[central_ypix,
-                            central_xpix] == False, f"Centred pixel of the full map is outside the useful(namely False) data!"
-        HeightInPixels = (self._wfmask[:, central_xpix] == False).sum()
-        WidthInPixels = (self._wfmask[central_ypix, :] == False).sum()
-
-        offsetX = (self._wfmask[central_ypix,
-                                0:self._wfmask.shape[1] // 2] == True).sum()
-        offsetY = (self._wfmask[0:self._wfmask.shape[0] //
-                                2, central_xpix] == True).sum()
-        # center of False map and origin of circular mask in pixel
-        yc0 = offsetY + HeightInPixels // 2
-        xc0 = offsetX + WidthInPixels // 2
-        RadiusInPixels = min(WidthInPixels, HeightInPixels) // 2
-        for j in range(self._wfmask.shape[0]):
-            for i in range(self._wfmask.shape[1]):
-                Distanceinpixels = np.sqrt(
-                    (j - yc0)**2 + (i - xc0)**2)
-                if(Distanceinpixels <= RadiusInPixels):
-                    circular_mask[j, i] = False
-                else:
-                    circular_mask[j, i] = True
-        return circular_mask, RadiusInPixels, yc0, xc0
 
 
 # da provare sul file cplm_all_fixed fatto il 17/3
@@ -1581,8 +1582,8 @@ class PixelRuler():
         x = np.zeros_like(self.ActsAroundBarycenter)
         for i, act in enumerate(self.ActsAroundBarycenter):
             y[i], x[i] = self._cpla._get_max_pixel(act)
-        y_barycenter = y.sum() // len(y)
-        x_barycenter = x.sum() // len(x)
+        y_barycenter = y.sum() / len(y)
+        x_barycenter = x.sum() / len(x)
         return y_barycenter, x_barycenter
 
     def build_pixel_dim_in_meters(self):
