@@ -138,7 +138,8 @@ class CommandToPositionLinearizationMeasurer(object):
         fits.append(fname, self._cmd_vector)
         fits.append(fname, self._actuators_list)
         fits.append(fname, self._reference_cmds)
-        fits.append(fname, self._acquired_wfflat)
+        fits.append(fname, self._acquired_wfflat.data)
+        fits.append(fname, self._acquired_wfflat.astype(int))
 
     @staticmethod
     def load(fname):
@@ -150,19 +151,31 @@ class CommandToPositionLinearizationMeasurer(object):
         cmd_vector = hduList[2].data
         actuators_list = hduList[3].data
         reference_commands = hduList[4].data
-        # wfs_flat_data = hduList[5].data
-        # wfs_flat_mask = hduList[6].data.astype(bool)
-        # wfs_flat = np.ma.masked_array(data=wfs_flat_data, mask=wfs_flat_mask)
-        # TODO: aggiungere try
-        # in modo da poter caricare sia i file cplm
-        # nuovi con le misure di flat e quelli vecchi
-        # senza misure di flat
-        return {'wfs': wfs,
-                'cmd_vector': cmd_vector,
-                'actuators_list': actuators_list,
-                'reference_shape': reference_commands,
-                'reference_shape_tag': header['REF_TAG']
-                }
+        # TODO: aggiungere try per caricare le misure dei flat
+        # dal file nel caso le possieda o meno
+        try:
+            print('loading...')
+            wfs_flat_data = hduList[5].data
+            wfs_flat_mask = hduList[6].data.astype(bool)
+            wfs_flat = np.ma.masked_array(
+                data=wfs_flat_data, mask=wfs_flat_mask)
+            return {'wfs': wfs,
+                    'cmd_vector': cmd_vector,
+                    'actuators_list': actuators_list,
+                    'reference_shape': reference_commands,
+                    'reference_shape_tag': header['REF_TAG'],
+                    'wfs_flat': wfs_flat
+                    }
+
+        except IndexError:
+            print('In this file: %s' %
+                  fname + '\nflat wavefront measurements are missing :( ')
+            return {'wfs': wfs,
+                    'cmd_vector': cmd_vector,
+                    'actuators_list': actuators_list,
+                    'reference_shape': reference_commands,
+                    'reference_shape_tag': header['REF_TAG']
+                    }
 
 
 class CommandToPositionLinearizationAnalyzer(object):
@@ -176,7 +189,10 @@ class CommandToPositionLinearizationAnalyzer(object):
         self._n_steps_voltage_scan = self._wfs.shape[1]
         # TODO: aggiungere try per caricare le misure del wf_flat
         # dal file nel caso le possieda o meno
-
+        try:
+            self._acquired_wfflat = res['wfs_flat']
+        except KeyError:
+            pass
     # def _max_wavefront(self, act_idx, cmd_index):
     #     wf = self._wfs[act_idx, cmd_index]
     #     coord_max = np.argwhere(np.abs(wf) == np.max(np.abs(wf)))[0]
@@ -1501,7 +1517,8 @@ class InfluenceFunctionMeasurer():
         fits.append(fname, self._cmd_vector)
         fits.append(fname, self._actuators_list)
         fits.append(fname, self._reference_cmds)
-        fits.append(fname, self._acquired_wfflat)
+        fits.append(fname, self._acquired_wfflat.data)
+        fits.append(fname, self._acquired_wfflat.astype(int))
 
     @staticmethod
     def load(fname):
@@ -1513,19 +1530,30 @@ class InfluenceFunctionMeasurer():
         cmd_vector = hduList[2].data
         actuators_list = hduList[3].data
         reference_commands = hduList[4].data
-        # wfs_flat_data = hduList[5].data
-        # wfs_flat_mask = hduList[6].data.astype(bool)
-        # wfs_flat = np.ma.masked_array(data=wfs_flat_data, mask=wfs_flat_mask)
-        # TODO: aggiungere try
-        # in modo da poter caricare sia i file cplm
-        # nuovi con le misure di flat e quelli vecchi
-        # senza misure di flat
-        return {'wfs': wfs,
-                'cmd_vector': cmd_vector,
-                'actuators_list': actuators_list,
-                'reference_shape': reference_commands,
-                'reference_shape_tag': header['REF_TAG']
-                }
+        # TODO: aggiungere try per caricare le misure dei flat
+        # dal file nel caso le possieda o meno
+        try:
+            wfs_flat_data = hduList[5].data
+            wfs_flat_mask = hduList[6].data.astype(bool)
+            wfs_flat = np.ma.masked_array(
+                data=wfs_flat_data, mask=wfs_flat_mask)
+            return {'wfs': wfs,
+                    'cmd_vector': cmd_vector,
+                    'actuators_list': actuators_list,
+                    'reference_shape': reference_commands,
+                    'reference_shape_tag': header['REF_TAG'],
+                    'wfs_flat': wfs_flat
+                    }
+
+        except IndexError:
+            print('In this file: %s' %
+                  fname + '\nflat wavefront measurements are missing :( ')
+            return {'wfs': wfs,
+                    'cmd_vector': cmd_vector,
+                    'actuators_list': actuators_list,
+                    'reference_shape': reference_commands,
+                    'reference_shape_tag': header['REF_TAG']
+                    }
 
 
 class PixelRuler():
