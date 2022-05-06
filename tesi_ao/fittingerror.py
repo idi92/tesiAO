@@ -80,6 +80,64 @@ class MemsfittingError():
         plt.ylabel('Normalized cumulative rms', size=25)
         plt.grid()
 
+    def _test_compute_cumulative_rms_for_different_actlist(self, mg, mcl, pupil_mask_obj):
+        '''
+        in base agli attuatori che utilizzo e vedo nella pupilla
+        cerco di capire quanti modi riesco a correggere
+        per poi usarli come base
+        '''
+        n_of_threshold = 7
+        self._visibility_threshold_span = np.linspace(0., 0.6, n_of_threshold)
+        self._acts_in_pupil_list = []
+        self._expected_fitting_error_list = np.zeros(
+            (n_of_threshold, self._num_of_modes))
+        self._cumulative_rms_list = np.zeros(
+            (n_of_threshold, self._num_of_modes))
+
+        for idx, threshold in enumerate(self._visibility_threshold_span):
+            print('Visibility threshold set to: %g' % threshold)
+            mg.THRESHOLD_RMS = threshold
+            self.compute_expected_fitting_error(mg, mcl, pupil_mask_obj)
+            self._compute_cumulative_rms()
+
+            self._acts_in_pupil_list.append(mg._acts_in_pupil)
+            self._expected_fitting_error_list[idx] = self._expected_fitting_error
+            self._cumulative_rms_list[idx] = self._cumulative_rms
+
+    def _show_normalized_fitting_error_pattern_list(self):
+
+        plt.figure()
+        plt.clf()
+        aj = self._coef_a * self.const
+        num_of_act = len(self._acts_in_pupil)
+        for idx, threshold in enumerate(self._visibility_threshold_span):
+            num_of_act = len(self._acts_in_pupil_list[idx])
+            plt.plot(self._modes_list, self._expected_fitting_error_list[idx] /
+                     aj, 'o-', label='threshold = %g' % threshold + ' #Nact = %d' % num_of_act)
+        plt.xlabel('Zernike index j', size=25)
+        plt.ylabel(r'$\sigma_{fitting_j}/a_j$', size=25)
+        plt.title(r'$D/r_0=%g $' % self._dr0_ratio + '\t' + r'$\lambda = %g m$' %
+                  self.WAVELENGTH, size=25)
+        plt.legend(loc='best')
+        plt.grid()
+
+    def _show_normalized_cumulative_list(self):
+        const2 = self.const * self.const
+        residual_variance1 = const2 * self._get_delta_from_noll(J=1)
+        sigma1 = np.sqrt(residual_variance1)
+        plt.figure()
+        plt.clf()
+        plt.title('First %d' % self._firstNmodes + ' Zernike generated' + 'D/r0=%g' %
+                  self._dr0_ratio + ' lambda=%g m' % self.WAVELENGTH)
+        for idx, threshold in enumerate(self._visibility_threshold_span):
+            num_of_act = len(self._acts_in_pupil_list[idx])
+            plt.loglog(self._modes_list, self._cumulative_rms_list[idx] / sigma1, 'o-',
+                       label='threshold = %g' % threshold + ' #Nact = %d' % num_of_act)
+        plt.xlabel('Zernike index j', size=25)
+        plt.ylabel('Normalized cumulative rms', size=25)
+        plt.legend(loc='best')
+        plt.grid()
+
     def _create_zernike_kolmogoroff_residual_errors(self):
         '''
         deltaJ from Noll1976
