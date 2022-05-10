@@ -7,6 +7,7 @@ class MemsfittingError():
 
     WAVELENGTH = 632.8e-9
     const = 0.5 * WAVELENGTH / np.pi  # from rad to nm
+    VIS_THRES_SPAN = np.array([0., 0.2, 0.3, 0.5, 0.6, 0.7])
 
     def __init__(self, r0, diameter, firstNmodes, j_start=None):
         if j_start is None:
@@ -26,18 +27,35 @@ class MemsfittingError():
         # THRESHOLD_RATIO che voglio
         # mg.THRESHOLD_RATIO = 0.5
         mg.compute_reconstructor(mask_obj=pupil_mask_obj)
+        self._clip_recorder_per_mode = []
+        self._act_pos_per_mode = np.zeros(
+            (self._num_of_modes, len(mg._acts_in_pupil)))
         for idx, j in enumerate(self._modes_list):
             # coef_a [rad] --> aj [nm rms]
             aj = self._coef_a[idx] * self.const
             print('Creating Z%d' % int(j) + ' with aj=%g [m]' % aj)
             mg.generate_zernike_mode(int(j), aj)
             mg.build_fitted_wavefront()
+            self._act_pos_per_mode[idx] = mg.get_position_cmds_from_wf()
+            self._clip_recorder_per_mode.append(mg._clip_recorder)
             self._expected_fitting_error[idx] = (
                 mg._wffitted - mg._wfmode).std()
             self._acts_in_pupil = mg._acts_in_pupil
-        self._expected_fitting_variance = self._expected_fitting_error**2
+        # self._expected_fitting_variance = self._expected_fitting_error**2
 
-    def _show_normalized_fitting_error_pattern(self):
+    def execute_fitting_error_measure(self, mg, mcl, mm):
+        self._measured_fitting_error = np.zeros(self._num_of_modes)
+        # self._wfs_to_reproduce
+        for idx, j in enumerate(self._modes_list):
+            aj = self._coef_a[idx] * self.const
+            print('Creating Z%d' % int(j) + ' with aj=%g [m]' % aj)
+            mg.generate_zernike_mode(int(j), aj)
+            mg.build_fitted_wavefront()
+            # pos_per_mode = self._act_pos_per_mode[idx]
+            mm.execute_measure(mcl, mg)  # pos=pos_per_mode
+            self._measured_fitting_error[idx] = (mm._wfmeas - mg._wfmode).std()
+
+    def _show_normalized_fitting_error_pattern(self, fitting_error):
         '''
         plots the fitting errors normalized to the relative
         mode amplitude aj, as a function of j index
@@ -46,7 +64,7 @@ class MemsfittingError():
         plt.figure()
         plt.clf()
         aj = self._coef_a * self.const
-        plt.plot(self._modes_list, self._expected_fitting_error /
+        plt.plot(self._modes_list, fitting_error /
                  aj, 'o-', label='#Nact = %d' % num_of_act)
         plt.xlabel('Zernike index j', size=25)
         plt.ylabel(r'$\sigma_{fitting_j}/a_j$', size=25)
@@ -55,12 +73,12 @@ class MemsfittingError():
         plt.legend(loc='best')
         plt.grid()
 
-    def _compute_cumulative_rms(self):
+    def _compute_cumulative_rms(self, fitting_error):
         const2 = self.const * self.const
         #residual_variance1 = const2 * self._get_delta_from_noll(J=1)
 
         self._cumulative_rms = np.zeros(self._num_of_modes)
-        fitted_variance = self._expected_fitting_error**2
+        fitted_variance = fitting_error**2
         for idx, j in enumerate(self._modes_list):
             quad_sum = self._get_delta_from_noll(
                 J=int(j)) * const2 + fitted_variance[0:idx + 1].sum()
@@ -86,33 +104,58 @@ class MemsfittingError():
         cerco di capire quanti modi riesco a correggere
         per poi usarli come base
         '''
-        n_of_threshold = 7
-        self._visibility_threshold_span = np.linspace(0., 0.6, n_of_threshold)
+        n_of_threshold = len(self.VIS_THRES_SPAN)
+
         self._acts_in_pupil_list = []
         self._expected_fitting_error_list = np.zeros(
             (n_of_threshold, self._num_of_modes))
-        self._cumulative_rms_list = np.zeros(
+        self._expected_cumulative_rms_list = np.zeros(
             (n_of_threshold, self._num_of_modes))
+        self._clip_recorder_per_thres_vis = []
+        self._act_pos_per_thres_vis = []
 
-        for idx, threshold in enumerate(self._visibility_threshold_span):
+        for idx, threshold in enumerate(self.VIS_THRES_SPAN):
             print('Visibility threshold set to: %g' % threshold)
             mg.THRESHOLD_RMS = threshold
             self.compute_expected_fitting_error(mg, mcl, pupil_mask_obj)
-            self._compute_cumulative_rms()
+
+            self._compute_cumulative_rms(self._expected_fitting_error)
 
             self._acts_in_pupil_list.append(mg._acts_in_pupil)
+            self._clip_recorder_per_thres_vis.append(
+                self._clip_recorder_per_mode)
+            self._act_pos_per_thres_vis.append(self._act_pos_per_mode)
             self._expected_fitting_error_list[idx] = self._expected_fitting_error
-            self._cumulative_rms_list[idx] = self._cumulative_rms
+            self._expected_cumulative_rms_list[idx] = self._cumulative_rms
 
-    def _show_normalized_fitting_error_pattern_list(self):
+    def _test_measure_cumulative_rms_for_different_actlist(self, mm, mg, mcl, pupil_mask_obj):
+        n_of_threshold = len(self.VIS_THRES_SPAN)
+
+        self._acts_in_pupil_list = []
+        self._measured_fitting_error_list = np.zeros(
+            (n_of_threshold, self._num_of_modes))
+        self._measured_cumulative_rms_list = np.zeros(
+            (n_of_threshold, self._num_of_modes))
+        for idx, threshold in enumerate(self.VIS_THRES_SPAN):
+            print('Visibility threshold set to: %g' % threshold)
+            mg.THRESHOLD_RMS = threshold
+            mg.compute_reconstructor(pupil_mask_obj)
+            self.execute_fitting_error_measure(mg, mcl, mm)
+            self._compute_cumulative_rms(
+                fitting_error=self._measured_fitting_error)
+            self._acts_in_pupil_list.append(mg._acts_in_pupil)
+            self._measured_fitting_error_list[idx] = self._measured_fitting_error
+            self._measured_cumulative_rms_list[idx] = self._cumulative_rms
+
+    def _show_normalized_fitting_error_pattern_list(self, fitting_error_list):
 
         plt.figure()
         plt.clf()
         aj = self._coef_a * self.const
-        num_of_act = len(self._acts_in_pupil)
-        for idx, threshold in enumerate(self._visibility_threshold_span):
+        #num_of_act = len(self._acts_in_pupil)
+        for idx, threshold in enumerate(self.VIS_THRES_SPAN):
             num_of_act = len(self._acts_in_pupil_list[idx])
-            plt.plot(self._modes_list, self._expected_fitting_error_list[idx] /
+            plt.plot(self._modes_list, fitting_error_list[idx] /
                      aj, 'o-', label='threshold = %g' % threshold + ' #Nact = %d' % num_of_act)
         plt.xlabel('Zernike index j', size=25)
         plt.ylabel(r'$\sigma_{fitting_j}/a_j$', size=25)
@@ -121,7 +164,7 @@ class MemsfittingError():
         plt.legend(loc='best')
         plt.grid()
 
-    def _show_normalized_cumulative_list(self):
+    def _show_normalized_cumulative_list(self, cumulative_rms_list):
         const2 = self.const * self.const
         residual_variance1 = const2 * self._get_delta_from_noll(J=1)
         sigma1 = np.sqrt(residual_variance1)
@@ -129,9 +172,9 @@ class MemsfittingError():
         plt.clf()
         plt.title('First %d' % self._firstNmodes + ' Zernike generated' + 'D/r0=%g' %
                   self._dr0_ratio + ' lambda=%g m' % self.WAVELENGTH)
-        for idx, threshold in enumerate(self._visibility_threshold_span):
+        for idx, threshold in enumerate(self.VIS_THRES_SPAN):
             num_of_act = len(self._acts_in_pupil_list[idx])
-            plt.loglog(self._modes_list, self._cumulative_rms_list[idx] / sigma1, 'o-',
+            plt.loglog(self._modes_list, cumulative_rms_list[idx] / sigma1, 'o-',
                        label='threshold = %g' % threshold + ' #Nact = %d' % num_of_act)
         plt.xlabel('Zernike index j', size=25)
         plt.ylabel('Normalized cumulative rms', size=25)
@@ -216,6 +259,19 @@ class MemsfittingError():
         plt.ylabel('normalized variance', size=25)
         plt.grid()
 
+    def save_list_results(self, fname):
+        hdr = fits.Header()
+        hdr['D_R0'] = self._dr0_ratio
+        hdr['WAVE'] = self.WAVELENGTH
+        fits.writeto(fname, self.VIS_THRES_SPAN, hdr)
+        fits.append(fname, self._modes_list)
+        fits.append(fname, self._expected_fitting_error_list)
+        fits.append(fname, self._measured_fitting_error_list)
+        fits.append(fname, self._expected_cumulative_rms_list)
+        fits.append(fname, self._measured_cumulative_rms_list)
+        for idx in range(len(self._acts_in_pupil_list)):
+            fits.append(fname, self._acts_in_pupil_list[idx])
+
 
 class MemsAmplitudeLinearityEstimator():
     AMPLITUDE_SPAN = np.array([-2000., -1500., -1000., -800., -400., -200., -100., -
@@ -259,19 +315,20 @@ class MemsAmplitudeLinearityEstimator():
         self._measured_amplitude = np.zeros(len(self.AMPLITUDE_SPAN))
         self._measured_fitting_error = np.zeros_like(self._measured_amplitude)
         for idx, aj in enumerate(self.AMPLITUDE_SPAN):
+            print('input Amplitude set to: %g m' % aj)
             self._measured_amplitude[idx], self._measured_fitting_error[idx] = self._compute_measured_amplitude(
                 jmode, aj)
 
     def _show_measured_vs_generated_amplitude(self, jmode):
         plt.figure()
         plt.clf()
-        plt.title(r'$Mode:\t Z_{%d}$' % jmode)
+        plt.title(r'$Mode: Z_{%d}$' % jmode)
         x = self.AMPLITUDE_SPAN / 1.e-9
-        y = self._measured_amplitude
-        yerr = self._measured_fitting_error
+        y = self._measured_amplitude / 1.e-9
+        yerr = self._measured_fitting_error / 1.e-9
         plt.errorbar(x, y, yerr)
-        plt.xlabel(r'$A_{generated}$\t[nm]', size=25)
-        plt.ylabel(r'$A_{measured}$\t[nm]', size=25)
+        plt.xlabel(r'$A_{generated}$ [nm]', size=25)
+        plt.ylabel(r'$A_{measured}$ [nm]', size=25)
 
     def save_results(self, jmode):
         file_name = self.fpath + 'z%d' % jmode + self.ffmt
