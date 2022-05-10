@@ -30,8 +30,10 @@ class CommandToPositionLinearizationMeasurer(object):
     # masked pixel ratio to ctrl and
     # and avoid nasty maps
     # rectangular old mask 0.7829
-    # circular new mask 0.8218
-    REASONABLE_MASKED_PIXELS_RATIO = 0.8218
+    # circular new mask
+    # 0.8218139146090535
+    # 0.821875
+    REASONABLE_MASKED_PIXELS_RATIO = 0.8227
 
     def __init__(self, interferometer, mems_deformable_mirror):
         self._interf = interferometer
@@ -74,6 +76,8 @@ class CommandToPositionLinearizationMeasurer(object):
                 0, 1, self.NUMBER_STEPS_VOLTAGE_SCAN) - self._reference_cmds[act]
             for cmd_idx, cmdi in enumerate(self._cmd_vector[act_idx]):
                 print("Act:%d - command %g" % (act, cmdi))
+                self._acquired_wfflat[act_idx] = self._get_zero_command_wavefront(
+                )
                 cmd = np.zeros(self._n_acts)
                 cmd[act] = cmdi
                 self._bmc.set_shape(cmd)
@@ -86,7 +90,7 @@ class CommandToPositionLinearizationMeasurer(object):
                           act_idx + ' cmd_idx %d' % cmd_idx)
                     self._avoid_saturated_measures(
                         masked_ratio, act_idx, cmd_idx, N_pixels)
-            self._acquired_wfflat[act_idx] = self._wfflat
+
             self.reset_flat_wavefront()
 
     def _avoid_saturated_measures(self, masked_ratio, act_idx, cmd_idx, N_pixels):
@@ -437,18 +441,27 @@ class MemsCommandLinearization():
         idx = self._get_act_idx(act)
         cmd_span = self._calibrated_cmd[idx]
         pos_span = self._calibrated_position[idx]
+        max_clipped_pos = np.max(pos_span)
+        min_clipped_pos = np.min(pos_span)
         # avro una sensibilita dell ordine di 1.e-4 in tensione,ok
-        pos_a = pos_span[pos_span <= pos].max()
-        pos_b = pos_span[pos_span >= pos].min()
-        # nel caso di funz biunivoca, viene scelto un
-        # punto corrispondente a pos, ma non so quale
-        # ma la coppia di indici e corretta
-        idx_cmd_a = np.where(pos_span == pos_a)[0][0]
-        idx_cmd_b = np.where(pos_span == pos_b)[0][0]
-        x = [pos_b, pos_a]
-        y = [cmd_span[idx_cmd_b], cmd_span[idx_cmd_a]]
-        f = interp1d(x, y)
-        return float(f(pos))
+        if(pos > max_clipped_pos):
+            idx_clipped_cmd = np.where(max_clipped_pos == pos_span)[0][0]
+            return cmd_span[idx_clipped_cmd]
+        if(pos < min_clipped_pos):
+            idx_clipped_cmd = np.where(min_clipped_pos == pos_span)[0][0]
+            return cmd_span[idx_clipped_cmd]
+        else:
+            pos_a = pos_span[pos_span <= pos].max()
+            pos_b = pos_span[pos_span >= pos].min()
+            # nel caso di funz biunivoca, viene scelto un
+            # punto corrispondente a pos, ma non so quale
+            # ma la coppia di indici e corretta
+            idx_cmd_a = np.where(pos_span == pos_a)[0][0]
+            idx_cmd_b = np.where(pos_span == pos_b)[0][0]
+            x = [pos_b, pos_a]
+            y = [cmd_span[idx_cmd_b], cmd_span[idx_cmd_a]]
+            f = interp1d(x, y)
+            return float(f(pos))
 
     def sampled_p2c(self, act, pos):
         '''
@@ -458,14 +471,23 @@ class MemsCommandLinearization():
         idx = self._get_act_idx(act)
         cmd_span = self._calibrated_cmd[idx]
         pos_span = self._calibrated_position[idx]
-        pos_a = pos_span[pos_span <= pos].max()
-        pos_b = pos_span[pos_span >= pos].min()
-        if(abs(pos - pos_a) > abs(pos - pos_b)):
-            pos_c = pos_b
+        max_clipped_pos = np.max(pos_span)
+        min_clipped_pos = np.min(pos_span)
+        if(pos > max_clipped_pos):
+            idx_clipped_cmd = np.where(max_clipped_pos == pos_span)[0][0]
+            return cmd_span[idx_clipped_cmd]
+        if(pos < min_clipped_pos):
+            idx_clipped_cmd = np.where(min_clipped_pos == pos_span)[0][0]
+            return cmd_span[idx_clipped_cmd]
         else:
-            pos_c = pos_a
-        idx_cmd = np.where(pos_span == pos_c)[0][0]
-        return cmd_span[idx_cmd]
+            pos_a = pos_span[pos_span <= pos].max()
+            pos_b = pos_span[pos_span >= pos].min()
+            if(abs(pos - pos_a) > abs(pos - pos_b)):
+                pos_c = pos_b
+            else:
+                pos_c = pos_a
+            idx_cmd = np.where(pos_span == pos_c)[0][0]
+            return cmd_span[idx_cmd]
 
     def save(self, fname):
         hdr = fits.Header()
@@ -613,6 +635,14 @@ class PupilMaskBuilder():
         n_pixels_along_y = (self._wfmask[:, x] == False).sum()
         return n_pixels_along_y, n_pixels_along_x
 
+    def get_number_of_false_pixels_along_pixel_axis(self, yp, xp):
+
+        y = int(yp)
+        x = int(xp)
+        n_pixels_along_x = (self._wfmask[y, :] == False).sum()
+        n_pixels_along_y = (self._wfmask[:, x] == False).sum()
+        return n_pixels_along_y, n_pixels_along_x
+
     def get_number_of_false_pixels_along_frame_axis(self):
         n_pixels_along_x_axis = np.zeros(
             self._wfmask.shape[1])  # shape[1]== len(y_axis)
@@ -674,6 +704,7 @@ class ModeGenerator():
         self._check_actuators_visibility(cmd)
         self._acts_in_pupil = np.where(
             self._rms_wf > self.THRESHOLD_RMS * self._rms_wf.max())[0]
+        self._n_of_selected_acts = len(self._acts_in_pupil)
 
     def _normalize_influence_function(self, act):
         return (self._cpla._wfs[act, self.NORM_AT_THIS_CMD][self._pupil_mask == False] /
@@ -735,6 +766,8 @@ class ModeGenerator():
         # check and clip cmds
         # should I clip voltage or stroke cmds?
         # act's stroke increases when moved with its neighbour
+
+        self._clip_recorder = np.zeros((self._n_of_selected_acts, 2))
         for idx in range(len(pos)):
             max_stroke = np.max(
                 self._mcl._deflection[self._acts_in_pupil[idx]])
@@ -742,9 +775,13 @@ class ModeGenerator():
                 self._mcl._deflection[self._acts_in_pupil[idx]])
             if(pos[idx] > max_stroke):
                 pos[idx] = max_stroke
+                self._clip_recorder[idx
+                                    ] = self._acts_in_pupil[idx], pos[idx]
                 print('act%d reached max stroke' % self._acts_in_pupil[idx])
             if(pos[idx] < min_stroke):
                 pos[idx] = min_stroke
+                self._clip_recorder[idx
+                                    ] = self._acts_in_pupil[idx], pos[idx]
                 print('act%d reached min stroke' % self._acts_in_pupil[idx])
         return pos
 
@@ -790,6 +827,12 @@ class ModeGenerator():
             (self._cpla._wfs.shape[2], self._cpla._wfs.shape[3]))
         mappa[self._pupil_mask == False] = wf_vector
         return np.ma.array(data=mappa, mask=self._pupil_mask)
+
+    def _show_clipped_act(self):
+        for idx in range(self._n_of_selected_acts):
+            if(self._clip_recorder[idx][-1] != 0):
+                print('Act %d' % self._clip_recorder[idx][0]
+                      + ' clipped to %g [m]' % self._clip_recorder[idx][-1])
 
 
 class ModeMeasurer():
@@ -1414,8 +1457,8 @@ class InfluenceFunctionMeasurer():
     # masked pixel ratio to ctrl and
     # and avoid nasty maps
     # rectangular old mask 0.7829
-    # circular new mask 0.8218
-    REASONABLE_MASKED_PIXELS_RATIO = 0.8218
+    # circular new mask
+    REASONABLE_MASKED_PIXELS_RATIO = 0.8227
 
     def __init__(self, interferometer, mems_deformable_mirror):
         self._interf = interferometer
@@ -1457,6 +1500,8 @@ class InfluenceFunctionMeasurer():
             self._cmd_vector[act_idx] = mcl.linear_p2c(int(act), pos)
             for cmd_idx, cmdi in enumerate(self._cmd_vector[act_idx]):
                 print("Act:%d - command %g" % (act, cmdi))
+                self._acquired_wfflat[act_idx] = self._get_zero_command_wavefront(
+                )
                 cmd = np.zeros(self._n_acts)
                 cmd[act] = cmdi
                 self._bmc.set_shape(cmd)
@@ -1469,7 +1514,7 @@ class InfluenceFunctionMeasurer():
                           act_idx + ' cmd_idx %d' % cmd_idx)
                     self._avoid_saturated_measures(
                         masked_ratio, act_idx, cmd_idx, N_pixels)
-            self._acquired_wfflat[act_idx] = self._wfflat
+            # self._acquired_wfflat[act_idx] = self._wfflat
             self._reset_flat_wavefront()
 
     def _avoid_saturated_measures(self, masked_ratio, act_idx, cmd_idx, N_pixels):
