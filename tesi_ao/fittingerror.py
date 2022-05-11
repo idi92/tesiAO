@@ -8,17 +8,22 @@ class MemsfittingError():
     WAVELENGTH = 632.8e-9
     const = 0.5 * WAVELENGTH / np.pi  # from rad to nm
     VIS_THRES_SPAN = np.array([0., 0.2, 0.3, 0.5, 0.6, 0.7])
+    fpath = 'prova/misure_con_tappo/kolmogoroff_fitting_error/mfe_'
+    ffmt = '.fits'
+    rms_threshold = 1.e-4
 
     def __init__(self, r0, diameter, firstNmodes, j_start=None):
         if j_start is None:
             # avoid Z1
             j_start = 2
+        self._diameter = diameter
+        self._r0 = r0
         self._dr0_ratio = diameter / r0
         self._ratio53 = (diameter / r0)**(5. / 3.)
         self._modes_list = np.arange(j_start, firstNmodes + 1)
         self._num_of_modes = len(self._modes_list)
         self._firstNmodes = firstNmodes
-        self._wavelength = 632.8e-9  # meters
+        # self._wavelength = 632.8e-9  # meters
         self._create_zernike_variance()
 
     def compute_expected_fitting_error(self, mg, mcl, pupil_mask_obj):
@@ -83,6 +88,13 @@ class MemsfittingError():
             quad_sum = self._get_delta_from_noll(
                 J=int(j)) * const2 + fitted_variance[0:idx + 1].sum()
             self._cumulative_rms[idx] = np.sqrt(quad_sum)
+
+    def _get_last_mode_to_fit(self, cumulative_rms):
+        for i in range(len(self._modes_list) - 1):
+            diff = np.abs(
+                cumulative_rms[i + 1] - cumulative_rms[i])
+            if(diff <= self.rms_threshold):
+                return self._modes_list[i], cumulative_rms[i]
 
     def _show_normalized_cumulative(self):
         const2 = self.const * self.const
@@ -261,7 +273,8 @@ class MemsfittingError():
 
     def save_list_results(self, fname):
         hdr = fits.Header()
-        hdr['D_R0'] = self._dr0_ratio
+        hdr['D'] = self._diameter
+        hdr['R0'] = self._r0
         hdr['WAVE'] = self.WAVELENGTH
         fits.writeto(fname, self.VIS_THRES_SPAN, hdr)
         fits.append(fname, self._modes_list)
@@ -272,11 +285,29 @@ class MemsfittingError():
         for idx in range(len(self._acts_in_pupil_list)):
             fits.append(fname, self._acts_in_pupil_list[idx])
 
+    def load_list(self, fname):
+        header = fits.getheader(fname)
+        hduList = fits.open(fname)
+        self.VIS_THRES_SPAN = hduList[0].data
+        self._modes_list = hduList[1].data
+        self._expected_fitting_error_list = hduList[2].data
+        self._measured_fitting_error_list = hduList[3].data
+        self._expected_cumulative_rms_list = hduList[4].data
+        self._measured_cumulative_rms_list = hduList[5].data
+        self._acts_in_pupil_list = []
+        for idx in range(len(self.VIS_THRES_SPAN)):
+            self._acts_in_pupil_list.append(hduList[6 + idx].data)
+        self._diameter = header['D']
+        self._r0 = header['R0']
+        self.WAVELENGTH = header['WAVE']
+        self.__init__(r0=self._r0, diameter=self._diameter,
+                      firstNmodes=self._modes_list[-1], j_start=self._modes_list[0])
+
 
 class MemsAmplitudeLinearityEstimator():
     AMPLITUDE_SPAN = np.array([-2000., -1500., -1000., -800., -400., -200., -100., -
                                50., -40., -20., 20., 40., 50., 100., 200., 400., 800., 1000., 1500., 2000.]) * 1.e-9
-    fpath = 'prova/misure_ampiezze/male_'
+    fpath = 'prova/misure_con_tappo/misure_ampiezze/male_'
     ffmt = '.fits'
 
     def __init__(self, mcl, mg, mm, pupil_mask_obj):
