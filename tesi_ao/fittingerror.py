@@ -5,25 +5,25 @@ from astropy.io import fits
 
 class MemsfittingError():
 
-    WAVELENGTH = 632.8e-9
-    const = 0.5 * WAVELENGTH / np.pi  # from rad to nm
+    # WAVELENGTH = 2200.e-9
+    # const = 0.5 * WAVELENGTH / np.pi  # from rad to nm
     VIS_THRES_SPAN = np.array([0., 0.2, 0.3, 0.5, 0.6, 0.7])
     fpath = 'prova/misure_con_tappo/kolmogoroff_fitting_error/mfe_'
     ffmt = '.fits'
     rms_threshold = 1.e-4
 
-    def __init__(self, r0, diameter, firstNmodes, j_start=None):
+    def __init__(self, wl_meters, scale_ratio, firstNmodes, j_start=None):
         if j_start is None:
             # avoid Z1
             j_start = 2
-        self._diameter = diameter
-        self._r0 = r0
-        self._dr0_ratio = diameter / r0
-        self._ratio53 = (diameter / r0)**(5. / 3.)
+        # self._dr0_ratio = scale_ratio
+        self.scale = scale_ratio
+        self._ratio53 = (scale_ratio)**(5. / 3.)
         self._modes_list = np.arange(j_start, firstNmodes + 1)
         self._num_of_modes = len(self._modes_list)
         self._firstNmodes = firstNmodes
-        # self._wavelength = 632.8e-9  # meters
+        self.WAVELENGTH = wl_meters  # meters
+        self.const = 0.5 * self.WAVELENGTH / np.pi
         self._create_zernike_variance()
 
     def compute_expected_fitting_error(self, mg, mcl, pupil_mask_obj):
@@ -32,17 +32,17 @@ class MemsfittingError():
         # THRESHOLD_RATIO che voglio
         # mg.THRESHOLD_RATIO = 0.5
         mg.compute_reconstructor(mask_obj=pupil_mask_obj)
-        self._clip_recorder_per_mode = []
-        self._act_pos_per_mode = np.zeros(
-            (self._num_of_modes, len(mg._acts_in_pupil)))
+        # self._clip_recorder_per_mode = []
+        # self._act_pos_per_mode = np.zeros(
+        # (self._num_of_modes, len(mg._acts_in_pupil)))
         for idx, j in enumerate(self._modes_list):
             # coef_a [rad] --> aj [nm rms]
             aj = self._coef_a[idx] * self.const
             print('Creating Z%d' % int(j) + ' with aj=%g [m]' % aj)
             mg.generate_zernike_mode(int(j), aj)
             mg.build_fitted_wavefront()
-            self._act_pos_per_mode[idx] = mg.get_position_cmds_from_wf()
-            self._clip_recorder_per_mode.append(mg._clip_recorder)
+            # self._act_pos_per_mode[idx] = mg.get_position_cmds_from_wf()
+            # self._clip_recorder_per_mode.append(mg._clip_recorder)
             self._expected_fitting_error[idx] = (
                 mg._wffitted - mg._wfmode).std()
             self._acts_in_pupil = mg._acts_in_pupil
@@ -73,7 +73,7 @@ class MemsfittingError():
                  aj, 'o-', label='#Nact = %d' % num_of_act)
         plt.xlabel('Zernike index j', size=25)
         plt.ylabel(r'$\sigma_{fitting_j}/a_j$', size=25)
-        plt.title(r'$D/r_0=%g $' % self._dr0_ratio + '\t' + r'$\lambda = %g m$' %
+        plt.title(r'$D/r_0=%g $' % self.scale + '\t' + r'$\lambda = %g m$' %
                   self.WAVELENGTH, size=25)
         plt.legend(loc='best')
         plt.grid()
@@ -103,8 +103,8 @@ class MemsfittingError():
         plt.figure()
         plt.clf()
         plt.title('First %d' % self._firstNmodes + ' Zernike generated' + 'D/r0=%g' %
-                  self._dr0_ratio + ' lambda=%g m' % self.WAVELENGTH)
-
+                  self.scale + ' lambda=%g m' % self.WAVELENGTH)
+        plt.loglog(1., 1., 'ok')
         plt.loglog(self._modes_list, self._cumulative_rms / sigma1, 'bo-')
         plt.xlabel('Zernike index j', size=25)
         plt.ylabel('Normalized cumulative rms', size=25)
@@ -123,8 +123,8 @@ class MemsfittingError():
             (n_of_threshold, self._num_of_modes))
         self._expected_cumulative_rms_list = np.zeros(
             (n_of_threshold, self._num_of_modes))
-        self._clip_recorder_per_thres_vis = []
-        self._act_pos_per_thres_vis = []
+        # self._clip_recorder_per_thres_vis = []
+        # self._act_pos_per_thres_vis = []
 
         for idx, threshold in enumerate(self.VIS_THRES_SPAN):
             print('Visibility threshold set to: %g' % threshold)
@@ -134,9 +134,9 @@ class MemsfittingError():
             self._compute_cumulative_rms(self._expected_fitting_error)
 
             self._acts_in_pupil_list.append(mg._acts_in_pupil)
-            self._clip_recorder_per_thres_vis.append(
-                self._clip_recorder_per_mode)
-            self._act_pos_per_thres_vis.append(self._act_pos_per_mode)
+            # self._clip_recorder_per_thres_vis.append(
+            # self._clip_recorder_per_mode)
+            # self._act_pos_per_thres_vis.append(self._act_pos_per_mode)
             self._expected_fitting_error_list[idx] = self._expected_fitting_error
             self._expected_cumulative_rms_list[idx] = self._cumulative_rms
 
@@ -171,7 +171,7 @@ class MemsfittingError():
                      aj, 'o-', label='threshold = %g' % threshold + ' #Nact = %d' % num_of_act)
         plt.xlabel('Zernike index j', size=25)
         plt.ylabel(r'$\sigma_{fitting_j}/a_j$', size=25)
-        plt.title(r'$D/r_0=%g $' % self._dr0_ratio + '\t' + r'$\lambda = %g m$' %
+        plt.title(r'$D/r_0=%g $' % self.scale + '\t' + r'$\lambda = %g m$' %
                   self.WAVELENGTH, size=25)
         plt.legend(loc='best')
         plt.grid()
@@ -183,7 +183,8 @@ class MemsfittingError():
         plt.figure()
         plt.clf()
         plt.title('First %d' % self._firstNmodes + ' Zernike generated' + 'D/r0=%g' %
-                  self._dr0_ratio + ' lambda=%g m' % self.WAVELENGTH)
+                  self.scale + ' lambda=%g m' % self.WAVELENGTH)
+        loglog(1., 1., 'ok')
         for idx, threshold in enumerate(self.VIS_THRES_SPAN):
             num_of_act = len(self._acts_in_pupil_list[idx])
             plt.loglog(self._modes_list, cumulative_rms_list[idx] / sigma1, 'o-',
@@ -271,10 +272,14 @@ class MemsfittingError():
         plt.ylabel('normalized variance', size=25)
         plt.grid()
 
-    def save_list_results(self, fname):
+    def save_list_results(self):
+        n_modes = int(self._modes_list[-1])
+        wl_nm = int(self.WAVELENGTH * 1.e9)
+        scale = int(self.scale)
+        fname = self.fpath + 'scale%d' % scale + \
+            '_modes%d' % n_modes + '_wl%d' % wl_nm + 'nm' + self.ffmt
         hdr = fits.Header()
-        hdr['D'] = self._diameter
-        hdr['R0'] = self._r0
+        hdr['SCALE'] = self.scale
         hdr['WAVE'] = self.WAVELENGTH
         fits.writeto(fname, self.VIS_THRES_SPAN, hdr)
         fits.append(fname, self._modes_list)
@@ -285,7 +290,9 @@ class MemsfittingError():
         for idx in range(len(self._acts_in_pupil_list)):
             fits.append(fname, self._acts_in_pupil_list[idx])
 
-    def load_list(self, fname):
+    def load_list(self, scale, n_modes, wl_nm):
+        fname = self.fpath + 'scale%d' % scale + \
+            '_modes%d' % n_modes + '_wl%d' % wl_nm + 'nm' + self.ffmt
         header = fits.getheader(fname)
         hduList = fits.open(fname)
         self.VIS_THRES_SPAN = hduList[0].data
@@ -297,10 +304,9 @@ class MemsfittingError():
         self._acts_in_pupil_list = []
         for idx in range(len(self.VIS_THRES_SPAN)):
             self._acts_in_pupil_list.append(hduList[6 + idx].data)
-        self._diameter = header['D']
-        self._r0 = header['R0']
+        self.scale = header['SCALE']
         self.WAVELENGTH = header['WAVE']
-        self.__init__(r0=self._r0, diameter=self._diameter,
+        self.__init__(wl_meters=self.WAVELENGTH, scale_ratio=self.scale,
                       firstNmodes=self._modes_list[-1], j_start=self._modes_list[0])
 
 
