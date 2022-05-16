@@ -184,7 +184,7 @@ class MemsfittingError():
         plt.clf()
         plt.title('First %d' % self._firstNmodes + ' Zernike generated' + 'D/r0=%g' %
                   self.scale + ' lambda=%g m' % self.WAVELENGTH)
-        loglog(1., 1., 'ok')
+        plt.loglog(1., 1., 'ok')
         for idx, threshold in enumerate(self.VIS_THRES_SPAN):
             num_of_act = len(self._acts_in_pupil_list[idx])
             plt.loglog(self._modes_list, cumulative_rms_list[idx] / sigma1, 'o-',
