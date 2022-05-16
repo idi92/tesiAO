@@ -5,6 +5,7 @@ from plico_dm import deformableMirror
 from astropy.io import fits
 from scipy.interpolate.interpolate import interp1d
 from functools import reduce
+from tesi_ao.mems_command_linearization import MemsCommandLinearization
 
 
 def create_devices():
@@ -13,7 +14,7 @@ def create_devices():
     return wyko, bmc
 
 
-class CommandToPositionLinearizationMeasurer(object):
+class CommandToPositionLinearizationMeasurerTRASHME(object):
 
     NUMBER_WAVEFRONTS_TO_AVERAGE = 1
     NUMBER_STEPS_VOLTAGE_SCAN = 11
@@ -98,7 +99,7 @@ class CommandToPositionLinearizationMeasurer(object):
                 }
 
 
-class CommandToPositionLinearizationAnalyzer(object):
+class CommandToPositionLinearizationAnalyzerTRASHME(object):
 
     def __init__(self, scan_fname):
         res = CommandToPositionLinearizationMeasurer.load(scan_fname)
@@ -148,48 +149,6 @@ class CommandToPositionLinearizationAnalyzer(object):
             self._reference_shape_tag)
 
 
-class MemsCommandLinearization():
-
-    def __init__(self,
-                 actuators_list,
-                 cmd_vector,
-                 deflection,
-                 reference_shape_tag):
-        self._actuators_list = actuators_list
-        self._cmd_vector = cmd_vector
-        self._deflection = deflection
-        self._reference_shape_tag = reference_shape_tag
-        self._create_interpolation()
-
-    def _create_interpolation(self):
-        self._finter = [interp1d(
-            self._deflection[i], self._cmd_vector[i], kind='cubic')
-            for i in range(self._cmd_vector.shape[0])]
-
-    def _get_act_idx(self, act):
-        return np.argwhere(self._actuators_list == act)[0][0]
-
-    def p2c(self, act, p):
-        idx = self._get_act_idx(act)
-        return self._finter[idx](p)
-
-    def save(self, fname):
-        hdr = fits.Header()
-        hdr['REF_TAG'] = self._reference_shape_tag
-        fits.writeto(fname, self._actuators_list, hdr)
-        fits.append(fname, self._cmd_vector)
-        fits.append(fname, self._deflection)
-
-    @staticmethod
-    def load(fname):
-        header = fits.getheader(fname)
-        hduList = fits.open(fname)
-        actuators_list = hduList[0].data
-        cmd_vector = hduList[1].data
-        deflection = hduList[2].data
-        reference_shape_tag = header['REF_TAG']
-        return MemsCommandLinearization(
-            actuators_list, cmd_vector, deflection, reference_shape_tag)
 
 
 def main220228():

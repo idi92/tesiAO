@@ -117,7 +117,7 @@ class ReasonableMaskedPixelsMeasurer(object):
     def reset_flat_wavefront(self):
         self._wfflat = None
 
-    def check_mask_coverage(self, ratio=False):
+    def display_mask_coverage(self, ratio=False):
         masked_pixels = np.array([self._wfs[a, i].mask.sum() for a in range(
             self._wfs.shape[0]) for i in range(self._wfs.shape[1])])
         titlestr = 'Number'
