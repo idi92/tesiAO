@@ -384,6 +384,7 @@ class MemsCommandLinearization():
     #     self._finter = [interp1d(
     #         self._deflection[i], self._cmd_vector[i], kind='cubic')
     #         for i in range(self._cmd_vector.shape[0])]
+    # prova
 
     def _create_interpolation_test(self):
         self._finter = [CubicSpline(self._cmd_vector[i], self._deflection[i], bc_type='natural')
