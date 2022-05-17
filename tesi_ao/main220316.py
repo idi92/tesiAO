@@ -248,11 +248,6 @@ class PupilMaskBuilder():
 
 
 # da provare sul file cplm_all_fixed fatto il 17/3
-def _do_it_wrong():
-    a = np.ones(5)
-    for i in range(10):
-        a[i] = 1
-    return a
 
 
 class ModeGenerator():
@@ -426,38 +421,42 @@ class ModeGenerator():
                       + ' clipped to %g [m]' % self._clip_recorder[idx][-1])
 
 
-class TestShapeReconstructionCommands():
-    '''
-    the aim of this class is to get new flat reference 
-    shape commands for DM, erasing any membrane deformations
-    as far as possible 
-    '''
-    TIME_OUT = 10
-
-    def __init__(self, interferometer, mems_deformable_mirror):
-        self._interf = interferometer
-        self._bmc = mems_deformable_mirror
-
-    def _get_new_reference_cmds(self, mcl, mg):
-        Nacts = self._bmc.get_number_of_actuators()
-        cmd0 = np.zeros(Nacts)
-        self._bmc.set_shape(cmd0)
-        wf_meas = self._interf.wavefront(timeout_in_sec=self.TIME_OUT)
-        mg._imask = wf_meas.mask
-        mg.compute_reconstructor()
-        pos = np.dot(mg._rec, wf_meas.compressed())
-        pos_of_all_acts = np.zeros_like(cmd0)
-        pos_of_all_acts[mg._acts_in_pupil] = pos
-        cmd_of_all_acts = np.zeros_like(cmd0)
-        pos_wf = np.zeros_like(cmd0)
-        for i in range(Nacts):
-            pos_wf[i] = mcl._finter[i](cmd_of_all_acts[i])
-        delta_pos = pos_of_all_acts - pos_wf
-        delta_cmd = np.zeros_like(cmd0)
-        for i in range(Nacts):
-            delta_cmd[i] = mcl.sampled_p2(i, delta_pos[i])
-        self._bmc.set_shape(delta_cmd)
-        return delta_cmd
+# class ShapeReconstructionCommands():
+#     '''
+#     the aim of this class is to get new flat reference
+#     shape commands for DM, erasing any membrane deformations
+#     as far as possible
+#     '''
+#     TIME_OUT = 10
+#
+#     def __init__(self, interferometer, mems_deformable_mirror):
+#         self._interf = interferometer
+#         self._bmc = mems_deformable_mirror
+#
+#     def _get_new_reference_cmds(self, mcl, mg):
+#
+#         Nacts = self._bmc.get_number_of_actuators()
+#         cmd0 = np.zeros(Nacts)
+#         self._bmc.set_shape(cmd0)
+#         wf_meas = self._interf.wavefront(timeout_in_sec=self.TIME_OUT)
+#         mg._imask = wf_meas.mask
+#         mg.compute_reconstructor()
+#         # compute positions from reconstructor
+#         pos = np.dot(mg._rec, wf_meas.compressed())
+#         pos_of_all_acts = np.zeros(Nacts)
+#         pos_of_all_acts[mg._acts_in_pupil] = pos
+#         # compute position from bmc cmds
+#         bmc_cmds = self._bmc.get_shape()
+#         bmc_pos = np.zeros(Nacts)
+#         for i in range(Nacts):
+#             bmc_pos[i] = mcl._finter[i](bmc_cmds[i])
+#         # compute required cmd
+#         delta_pos = bmc_pos - pos_of_all_acts
+#         delta_cmd = np.zeros(Nacts)
+#         for i in range(Nacts):
+#             delta_cmd[i] = mcl._sampled_p2c(i, delta_pos[i])
+#         self._bmc.set_shape(delta_cmd)
+#         return delta_cmd
 
 
 class ModeMeasurer():
