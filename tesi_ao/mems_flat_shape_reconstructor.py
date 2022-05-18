@@ -6,6 +6,7 @@ from random import uniform
 from tesi_ao.main220316 import PupilMaskBuilder
 from arte.types.wavefront import Wavefront
 from arte.types.mask import CircularMask
+from future.backports.test.support import time_out
 
 
 class ShapeReconstructionCommands():
@@ -41,7 +42,7 @@ class ShapeReconstructionCommands():
 
     def _test_decompose_wf(self, mg, act_list=None):
 
-        wf = self._get_random_wavefront(act_list)
+        wf = self._interf.wavefront(timeout_in_sec=self.TIME_OUT)
         wf_mask = wf.mask
         frame_shape = wf.mask.shape
         n_modes_to_decompose = 3
@@ -49,20 +50,21 @@ class ShapeReconstructionCommands():
         self._decomposed_wfs = np.ma.zeros(
             (n_modes_to_decompose, frame_shape[0], frame_shape[1]))
         coeff_a = np.zeros(n_modes_to_decompose)
-
-        pmb = PupilMaskBuilder(wf_mask)
+        intersection_mask = np.ma.mask_or(mg._imask, wf_mask)
+        pmb = PupilMaskBuilder(intersection_mask)
         yc, xc = pmb.get_barycenter_of_false_pixels()
         D1, D2 = pmb.get_number_of_false_pixels_along_barycenter_axis()
-        R_pixels = min(D1, D2) * 0.5 - 3
-        cmask = pmb.get_circular_mask(R_pixels, (yc, xc))
-        wf = np.ma.array(data=wf.data, mask=cmask.mask())
+        R_pixels = min(D1, D2) * 0.5 - 2.5
+        cmask = CircularMask(frameShape=frame_shape,
+                             maskRadius=R_pixels, maskCenter=(yc, xc))
+        wf_cmasked = np.ma.array(data=wf.data, mask=cmask.mask())
         decomposer = ModalDecomposer(n_modes_to_decompose)
-        mg._imask = wf_mask
+        # mg._imask = wf_mask
         mg.compute_reconstructor(cmask)
-        WF = Wavefront.fromNumpyArray(wf)
-        WF_MASK = CircularMask.fromMaskedArray(wf)
+        WF = Wavefront.fromNumpyArray(wf_cmasked)
+        # WF_MASK = CircularMask.fromMaskedArray(wf_cmasked)
         coeff_a = decomposer.measureZernikeCoefficientsFromWavefront(
-            WF, WF_MASK, n_modes_to_decompose)
+            WF, cmask, n_modes_to_decompose)
         for j in range(2, 2 + n_modes_to_decompose):
             mg.generate_zernike_mode(j, coeff_a[j])
             self._decomposed_wfs[j] = coeff_a[j] * mg._wfmode
