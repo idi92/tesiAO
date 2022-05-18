@@ -6,7 +6,6 @@ from random import uniform
 from tesi_ao.main220316 import PupilMaskBuilder
 from arte.types.wavefront import Wavefront
 from arte.types.mask import CircularMask
-from future.backports.test.support import time_out
 
 
 class ShapeReconstructionCommands():
@@ -43,13 +42,15 @@ class ShapeReconstructionCommands():
     def _test_decompose_wf(self, mg, act_list=None):
 
         wf = self._interf.wavefront(timeout_in_sec=self.TIME_OUT)
+
         wf_mask = wf.mask
         frame_shape = wf.mask.shape
         n_modes_to_decompose = 3
+        self._mode_list = np.arange(2, 2 + n_modes_to_decompose)
 
         self._decomposed_wfs = np.ma.zeros(
             (n_modes_to_decompose, frame_shape[0], frame_shape[1]))
-        coeff_a = np.zeros(n_modes_to_decompose)
+        # coeff_a = np.zeros(n_modes_to_decompose)
         intersection_mask = np.ma.mask_or(mg._imask, wf_mask)
         pmb = PupilMaskBuilder(intersection_mask)
         yc, xc = pmb.get_barycenter_of_false_pixels()
@@ -58,18 +59,32 @@ class ShapeReconstructionCommands():
         cmask = CircularMask(frameShape=frame_shape,
                              maskRadius=R_pixels, maskCenter=(yc, xc))
         wf_cmasked = np.ma.array(data=wf.data, mask=cmask.mask())
-        decomposer = ModalDecomposer(n_modes_to_decompose)
+        self._acquired_wf = wf_cmasked
         # mg._imask = wf_mask
         mg.compute_reconstructor(cmask)
         WF = Wavefront.fromNumpyArray(wf_cmasked)
         # WF_MASK = CircularMask.fromMaskedArray(wf_cmasked)
-        coeff_a = decomposer.measureZernikeCoefficientsFromWavefront(
-            WF, cmask, n_modes_to_decompose)
-        for j in range(2, 2 + n_modes_to_decompose):
-            mg.generate_zernike_mode(j, coeff_a[j])
-            self._decomposed_wfs[j] = coeff_a[j] * mg._wfmode
+        decomposer = ModalDecomposer(n_modes_to_decompose)
+        self._coeff_a = decomposer.measureZernikeCoefficientsFromWavefront(
+            WF, cmask, n_modes_to_decompose).getZ(self._mode_list)
+        for idx, j in enumerate(self._mode_list):
+            mg.generate_zernike_mode(int(j), self._coeff_a[idx])
+            self._decomposed_wfs[idx] = mg._wfmode
 
-    def _get_new_reference_cmds(self, mcl, mg):
+    # def _test_get_ipotetical_flat_cmd(self, mg):
+    #     Nacts = self._bmc.get_number_of_actuators()
+    #     self._test_decompose_wf(mg, act_list=None)
+    #     trash_wf = self._acquired_wf - (self._decomposed_wfs.sum(axis=0))
+    #     ipotetical_flat_wf = self._decomposed_wfs.sum(axis=0)
+    #     pos = np.dot(mg._rec, ipotetical_flat_wf.compressed())
+    #     pos_of_all_acts = np.zeros(Nacts)
+    #     pos_of_all_acts[mg._acts_in_pupil] = pos
+    #     cmd_new = np.zeros(Nacts)
+    #     for i in range(Nacts):
+    #         cmd_new[i] = self._mcl._sampled_p2c(i, pos_of_all_acts[i])
+    #     return cmd_new
+
+    def _get_new_reference_cmds_from_wf(self, mg):
 
         Nacts = self._bmc.get_number_of_actuators()
         cmd0 = np.zeros(Nacts)
@@ -85,11 +100,11 @@ class ShapeReconstructionCommands():
         bmc_cmds = self._bmc.get_shape()
         bmc_pos = np.zeros(Nacts)
         for i in range(Nacts):
-            bmc_pos[i] = mcl._finter[i](bmc_cmds[i])
+            bmc_pos[i] = self._mcl._finter[i](bmc_cmds[i])
         # compute required cmd
         delta_pos = bmc_pos - pos_of_all_acts
         delta_cmd = np.zeros(Nacts)
         for i in range(Nacts):
-            delta_cmd[i] = mcl._sampled_p2c(i, delta_pos[i])
+            delta_cmd[i] = self._mcl._sampled_p2c(i, delta_pos[i])
         self._bmc.set_shape(delta_cmd)
         return delta_cmd
