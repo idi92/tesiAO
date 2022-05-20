@@ -9,6 +9,10 @@ setup(name='tesiAO',
       license='MIT',
       packages=['tesi_ao'],
       install_requires=[
+          'plico_interferometer',
+          'plico_dm',
+          'numpy',
+          'arte',
       ],
       package_data={
           'tesi_ao': ['data/*'],

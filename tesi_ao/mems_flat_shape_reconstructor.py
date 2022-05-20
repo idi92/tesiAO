@@ -1,12 +1,10 @@
 import numpy as np
 from arte.utils.modal_decomposer import ModalDecomposer
 from tesi_ao.mems_command_linearization import MemsCommandLinearization
-from arte.utils.zernike_generator import ZernikeGenerator
 from random import uniform
 from tesi_ao.main220316 import PupilMaskBuilder
 from arte.types.wavefront import Wavefront
 from arte.types.mask import CircularMask
-from arte import wfs
 
 
 class ShapeReconstructionCommands():
@@ -16,12 +14,13 @@ class ShapeReconstructionCommands():
     as far as possible 
     '''
     TIME_OUT = 10
-    mcl_fname = 'prova/all_act/sandbox/mcl_all_fixedpix.fits'
 
-    def __init__(self, interferometer, mems_deformable_mirror):
+    def __init__(self, interferometer, mems_deformable_mirror, mcl_fname=None):
         self._interf = interferometer
         self._bmc = mems_deformable_mirror
-        self._mcl = MemsCommandLinearization.load(self.mcl_fname)
+        if mcl_fname is None:
+            mcl_fname = 'prova/all_act/sandbox/mcl_all_fixedpix.fits'
+        self._mcl = MemsCommandLinearization.load(mcl_fname)
 
     def _get_random_cmds(self, act_list=None):
         Nacts = self._bmc.get_number_of_actuators()
