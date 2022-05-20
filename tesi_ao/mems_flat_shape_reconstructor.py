@@ -6,6 +6,7 @@ from random import uniform
 from tesi_ao.main220316 import PupilMaskBuilder
 from arte.types.wavefront import Wavefront
 from arte.types.mask import CircularMask
+from arte import wfs
 
 
 class ShapeReconstructionCommands():
@@ -70,6 +71,13 @@ class ShapeReconstructionCommands():
         for idx, j in enumerate(self._mode_list):
             mg.generate_zernike_mode(int(j), self._coeff_a[idx])
             self._decomposed_wfs[idx] = mg._wfmode
+        wf_sum = self._decomposed_wfs.sum(axis=0)
+        mg.build_fitted_wavefront(wfmap=wf_sum)
+        pos_wf_sum = np.dot(mg._rec, wf_sum.compressed())
+        pos140 = np.zeros(self._bmc.get_number_of_actuators())
+        pos140[mg._acts_in_pupil] = pos_wf_sum
+        cmd140 = self._mcl.p2c(pos140)
+        self._bmc.set_shape(cmd140)
 
     # def _test_get_ipotetical_flat_cmd(self, mg):
     #     Nacts = self._bmc.get_number_of_actuators()
@@ -84,16 +92,50 @@ class ShapeReconstructionCommands():
     #         cmd_new[i] = self._mcl._sampled_p2c(i, pos_of_all_acts[i])
     #     return cmd_new
 
+    def _test_(self, mg):
+        wf = self._interf.wavefront()
+        anti_wf = - wf
+        mg._imask = wf.mask
+        mg.compute_reconstructor()
+        pos = np.dot(mg._rec, (anti_wf).compressed())
+        pos140 = np.zeros(140)
+        pos140[mg._acts_in_pupil] = pos
+        cmd140 = self._mcl.p2c(pos140)
+        self._bmc.set_shape(cmd140)
+        return pos140, cmd140
+
     def _get_new_reference_cmds_from_wf(self, mg):
 
         Nacts = self._bmc.get_number_of_actuators()
-        cmd0 = np.zeros(Nacts)
-        self._bmc.set_shape(cmd0)
+        #cmd0 = np.zeros(Nacts)
+        # self._bmc.set_shape(cmd0)
         wf_meas = self._interf.wavefront(timeout_in_sec=self.TIME_OUT)
+        self._wf_meas = wf_meas
         mg._imask = wf_meas.mask
         mg.compute_reconstructor()
         # compute positions from reconstructor
         pos = np.dot(mg._rec, wf_meas.compressed())
+        pos_of_all_acts = np.zeros(Nacts)
+        pos_of_all_acts[mg._acts_in_pupil] = pos
+        # compute position from bmc cmds
+        bmc_cmds = self._bmc.get_shape()
+        bmc_pos = np.zeros(Nacts)
+        for i in range(Nacts):
+            bmc_pos[i] = self._mcl._finter[i](bmc_cmds[i])
+        # compute required cmd
+        self._delta_pos = bmc_pos - pos_of_all_acts
+        delta_cmd = np.zeros(Nacts)
+        for i in range(Nacts):
+            delta_cmd[i] = self._mcl._sampled_p2c(i, self._delta_pos[i])
+        self._bmc.set_shape(delta_cmd)
+
+        return delta_cmd, pos_of_all_acts
+
+    def _test_iterare_me_for_new_cmd_corrections(self, wf, mg):
+        Nacts = self._bmc.get_number_of_actuators()
+        mg._imask = wf.mask
+        mg.compute_reconstructor()
+        pos = np.dot(mg._rec, wf.compressed())
         pos_of_all_acts = np.zeros(Nacts)
         pos_of_all_acts[mg._acts_in_pupil] = pos
         # compute position from bmc cmds
