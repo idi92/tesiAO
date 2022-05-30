@@ -1,6 +1,7 @@
 import numpy as np
 from astropy.io import fits
 from tesi_ao.mems_command_linearization import MemsCommandLinearization
+from functools import reduce
 
 
 class ZonalInfluenceFunctionMeasurer(object):
@@ -63,7 +64,13 @@ class ZonalInfluenceFunctionMeasurer(object):
         for act in self.actuators_list:
             dd[act] = ifs[act] - np.ma.median(ifs[act])
         self.ifs = dd
-        return dd
+        self._apply_intersection_mask()
+        return self.ifs
+
+    def _apply_intersection_mask(self):
+        imask = reduce(lambda a, b: np.ma.mask_or(
+            a, b), self.ifs[:].mask)
+        self.ifs[:].mask = imask
 
     def save_ifs(self, fname):
         hdr = fits.Header()
@@ -78,7 +85,7 @@ class ZonalInfluenceFunctionMeasurer(object):
         ifs_data = hduList[0].data
         ifs_mask = hduList[1].data.astype(bool)
         ifs = np.ma.masked_array(data=ifs_data, mask=ifs_mask)
-        act_list = hduList[3].data
+        act_list = hduList[2].data
 
         stroke = header['STROKE']
         return stroke, act_list, ifs
