@@ -7,6 +7,9 @@ from tesi_ao.mems_reconstructor import MemsZonalReconstructor
 from arte.utils.zernike_generator import ZernikeGenerator
 import numpy as np
 import matplotlib.pyplot as plt
+from tesi_ao.zernike_modal_reconstructor import ZernikeToZonal
+
+
 
 
 class Prove220531():
@@ -14,31 +17,40 @@ class Prove220531():
     def __init__(self, ifs_fname, mcl_fname):
 
         self._mcl = MemsCommandLinearization.load(mcl_fname)
-        self.ppstroke, self.actuators_list, self.ifs = ZonalInfluenceFunctionMeasurer.load_ifs(
+        self.ppstroke, self.list_all_acts, self.ifs = ZonalInfluenceFunctionMeasurer.load_ifs(
             ifs_fname)
         self.ifs_mask = self.ifs[0].mask
-        self.cmask_obj = CircularMask(
-            self.ifs[0].shape, maskRadius=131., maskCenter=(234., 309.))
-        self.cmask = self.cmask_obj.mask()
         self._wyko, self._bmc = create_devices()
 
-    def _prova_get_rec_per_spianare(self):
-        # cmask_obj = CircularMask(
-        #     self.ifs[0].shape, maskRadius=131., maskCenter=(234., 309.))
-        # cmask = cmask_obj.mask()
-        mzr = MemsZonalReconstructor(
-            self.cmask, self.ppstroke, self.actuators_list, self.ifs)
-        rec = mzr._rec
-        return rec
+    def create_mask(self, radius=115, center=(225,309)):
+        self.cmask_obj = CircularMask(
+            self.ifs[0].shape, maskRadius=radius, maskCenter=center)
+        self.cmask = self.cmask_obj.mask()
 
-    def one_step(self, rec):
+    def create_mask_from_ifs(self):
+        '''
+        A CircularMask with radius 5% smaller than the one of the Influence
+        Functions
+        ''' 
+        mask = CircularMask.fromMaskedArray(self.ifs[0])
+        self.cmask_obj = CircularMask(mask.shape(),
+                                      mask.radius()*0.95,
+                                      mask.center())
+        print(self.cmask_obj)
+        self.cmask = self.cmask_obj.mask()
+
+    def one_step(self):
         gain = 1
-        wf = self._wavefront_on_cmask()
-        self._dpos = np.zeros(140)
-        self._dpos = -1 * \
-            gain * np.dot(rec, wf.compressed())
+        self._wf = self._wavefront_on_cmask()
+        self._dpos = np.zeros(self.number_of_actuators)
+        self._dpos[self._mzr.selected_actuators] = -1 * \
+            gain * np.dot(self.rec, self._wf.compressed())
         currentpos = self._mcl.c2p(self._bmc.get_shape())
         self._bmc.set_shape(self._mcl.p2c(currentpos + self._dpos))
+        #self._show_wf_and_print_residual()
+        
+        
+    def show_wf_and_print_residual(self):
         wf_spianato = self._wavefront_on_cmask()
         err_wf_sp = (wf_spianato.compressed()).std()
         print(err_wf_sp)
@@ -47,23 +59,35 @@ class Prove220531():
         plt.imshow(wf_spianato)
         plt.colorbar()
 
+    @property
+    def number_of_actuators(self):
+        return self._bmc.get_number_of_actuators()
+
+
+    def _check_wavefront_mask_is_in_cmask(self, wf_mask):
+        intersection_mask = np.ma.mask_or(wf_mask, self.cmask)
+        assert (intersection_mask == self.cmask).all(
+        ) == True, "Wavefront mask is not valid!\nShould be fully inscribed in the reconstructor mask!"
+
+
     def _wavefront_on_cmask(self):
         wf = self._wyko.wavefront(timeout_in_sec=10)
+        # TODO: add check that wf.mask is included in self.cmask
+        # otherwise raise exception
+        self._check_wavefront_mask_is_in_cmask(wf.mask)
         wf = np.ma.array(wf.data, mask=self.cmask)
         return wf
 
     def deforma_mems(self):
-        n_acts = len(self.actuators_list)
-        pos = np.zeros(n_acts)
         pos = np.random.uniform(
-            -500e-9, 500e-9, n_acts)
+            -500e-9, 500e-9, self.number_of_actuators)
         self._bmc.set_shape(self._mcl.p2c(pos))
 
-    def prova_genera_rec_con_cmask(self):
+    def create_reconstructor(self):
         '''
-        creo una maschera circolare e costruisco la matrice di ricostruzione
-        con quella maschera
-        verifico che la cmask sia all interno della ifs_mask
+        costruisco la matrice di ricostruzione
+        con la maschera specificata precedentemente
+        (MemsModalReconstructor verifica che cmask sia inclusa in ifs_mask)
 
         '''
         # pmb = PupilMaskBuilder(self.ifs_mask)
@@ -77,14 +101,42 @@ class Prove220531():
         # self.cmask_obj = pmb.get_circular_mask(radius_in_pixels, (yc, xc))
         # print(self.cmask_obj)
         # self.cmask = self.cmask_obj.mask()
-        self.cmask_obj = CircularMask.fromMaskedArray(self.ifs[0])
-        print(self.cmask_obj)
-        self.cmask = self.cmask_obj.mask()
-        mzr = MemsZonalReconstructor(
-            cmask=self.cmask, ifs_stroke=self.ppstroke, act_list=self.actuators_list, ifs=self.ifs)
-        self.rec = mzr.get_reconstruction_matrix()
-        self.im = mzr._im
+        self._mzr = MemsZonalReconstructor(
+            cmask=self.cmask, ifs_stroke=self.ppstroke, ifs=self.ifs)
+        self.rec = self._mzr.reconstruction_matrix
+        self.im = self._mzr.interaction_matrix
 
+
+# Al 220603
+# ifs = misure_con_tappo/zifs_pushpull500nm.fits
+# mcl = mcl/mcl_all_fixedpix.fits
+
+
+def main_220603(ifs_fname, mcl_fname):
+    pp = Prove220531(ifs_fname, mcl_fname)
+    #pp.create_mask_from_ifs()
+    pp.create_mask(radius=115, center=(225,309))
+    pp.create_reconstructor()
+    
+    for i in range(10):
+        pp.one_step()
+    wf_flat = pp._wavefront_on_cmask()
+    cmd_flat = pp._bmc.get_shape()
+    
+    zern2zonal = ZernikeToZonal(pp._mzr, pp.cmask_obj)
+    
+    modal_ampl=np.zeros(50)
+    modal_ampl[0]=300e-9
+    pos = zern2zonal.convert_modal_to_zonal(modal_ampl)
+    pp._bmc.set_shape(pp._mcl.p2c(pos) + cmd_flat)
+    wf=pp._wavefront_on_cmask()
+    plt.imshow(wf-wf_flat)
+    plt.colorbar()
+    plt.show()
+    return pp, zern2zonal, wf_flat, cmd_flat
+
+
+class Buttami():
     def prova_genera_zernike_in_cmask(self, j, aj):
         zg = ZernikeGenerator(self.cmask_obj)
         wfmode = np.zeros(self.cmask.shape)
@@ -102,15 +154,15 @@ class Prove220531():
         print(pos_cmd_from_wfmode.shape)
         for idx in range(len(pos_cmd_from_wfmode)):
             max_stroke = np.max(
-                self._mcl._deflection[self.actuators_list[idx]])
+                self._mcl._deflection[self.list_all_acts[idx]])
             min_stroke = np.min(
-                self._mcl._deflection[self.actuators_list[idx]])
+                self._mcl._deflection[self.list_all_acts[idx]])
             if(pos_cmd_from_wfmode[idx] > max_stroke):
                 pos_cmd_from_wfmode[idx] = max_stroke
-                print('act%d reached max stroke' % self.actuators_list[idx])
+                print('act%d reached max stroke' % self.list_all_acts[idx])
             if(pos_cmd_from_wfmode[idx] < min_stroke):
                 pos_cmd_from_wfmode[idx] = min_stroke
-                print('act%d reached min stroke' % self.actuators_list[idx])
+                print('act%d reached min stroke' % self.list_all_acts[idx])
         wffitted = np.zeros(self.cmask.shape)
         wffitted[self.cmask == False] = np.dot(self.im, pos_cmd_from_wfmode)
         wffitted = np.ma.array(
@@ -131,7 +183,10 @@ class Prove220531():
         print('exp fit err: %g' % expected_fitting_error)
 
 
-class Prove2205020():
+
+
+
+class Prove220520():
 
     def __init__(self, mcl_name, cplm_name):
         #mcl_name = '/Users/lbusoni/Downloads/mcl_all_fixedpix.fits'
