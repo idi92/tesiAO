@@ -55,7 +55,7 @@ class ZonalInfluenceFunctionMeasurer(object):
                 timeout_in_sec=self.TIMEOUT)
 
             self._position_cmd_vector[act] = 0.
-        self._pos = pos
+        self._pos = pos  # push pull
 
     def compute_zonal_ifs(self):
         ifs = self._wfpos - self._wfneg
@@ -63,7 +63,7 @@ class ZonalInfluenceFunctionMeasurer(object):
         dd = np.ma.zeros((self._num_of_acts, frame_shape[0], frame_shape[1]))
         for act in self.actuators_list:
             dd[act] = ifs[act] - np.ma.median(ifs[act])
-        self.ifs = dd
+        self.ifs = 0.5 * dd
         self._apply_intersection_mask()
         return self.ifs
 
@@ -79,7 +79,8 @@ class ZonalInfluenceFunctionMeasurer(object):
         fits.append(fname, self.ifs.mask.astype(int))
         fits.append(fname, self.actuators_list)
 
-    def load_ifs(self, fname):
+    @staticmethod
+    def load_ifs(fname):
         header = fits.getheader(fname)
         hduList = fits.open(fname)
         ifs_data = hduList[0].data
