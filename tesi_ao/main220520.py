@@ -10,8 +10,6 @@ import matplotlib.pyplot as plt
 from tesi_ao.zernike_modal_reconstructor import ZernikeToZonal
 
 
-
-
 class Prove220531():
 
     def __init__(self, ifs_fname, mcl_fname):
@@ -22,7 +20,7 @@ class Prove220531():
         self.ifs_mask = self.ifs[0].mask
         self._wyko, self._bmc = create_devices()
 
-    def create_mask(self, radius=115, center=(225,309)):
+    def create_mask(self, radius=115, center=(225, 309)):
         self.cmask_obj = CircularMask(
             self.ifs[0].shape, maskRadius=radius, maskCenter=center)
         self.cmask = self.cmask_obj.mask()
@@ -31,10 +29,10 @@ class Prove220531():
         '''
         A CircularMask with radius 5% smaller than the one of the Influence
         Functions
-        ''' 
+        '''
         mask = CircularMask.fromMaskedArray(self.ifs[0])
         self.cmask_obj = CircularMask(mask.shape(),
-                                      mask.radius()*0.95,
+                                      mask.radius() * 0.95,
                                       mask.center())
         print(self.cmask_obj)
         self.cmask = self.cmask_obj.mask()
@@ -47,9 +45,8 @@ class Prove220531():
             gain * np.dot(self.rec, self._wf.compressed())
         currentpos = self._mcl.c2p(self._bmc.get_shape())
         self._bmc.set_shape(self._mcl.p2c(currentpos + self._dpos))
-        #self._show_wf_and_print_residual()
-        
-        
+        # self._show_wf_and_print_residual()
+
     def show_wf_and_print_residual(self):
         wf_spianato = self._wavefront_on_cmask()
         err_wf_sp = (wf_spianato.compressed()).std()
@@ -63,12 +60,10 @@ class Prove220531():
     def number_of_actuators(self):
         return self._bmc.get_number_of_actuators()
 
-
     def _check_wavefront_mask_is_in_cmask(self, wf_mask):
         intersection_mask = np.ma.mask_or(wf_mask, self.cmask)
         assert (intersection_mask == self.cmask).all(
         ) == True, "Wavefront mask is not valid!\nShould be fully inscribed in the reconstructor mask!"
-
 
     def _wavefront_on_cmask(self):
         wf = self._wyko.wavefront(timeout_in_sec=10)
@@ -114,23 +109,23 @@ class Prove220531():
 
 def main_220603(ifs_fname, mcl_fname):
     pp = Prove220531(ifs_fname, mcl_fname)
-    #pp.create_mask_from_ifs()
-    pp.create_mask(radius=115, center=(225,309))
+    # pp.create_mask_from_ifs()
+    pp.create_mask(radius=115, center=(225, 309))
     pp.create_reconstructor()
-    
+
     for i in range(10):
         pp.one_step()
     wf_flat = pp._wavefront_on_cmask()
     cmd_flat = pp._bmc.get_shape()
-    
+
     zern2zonal = ZernikeToZonal(pp._mzr, pp.cmask_obj)
-    
-    modal_ampl=np.zeros(50)
-    modal_ampl[0]=300e-9
+
+    modal_ampl = np.zeros(50)
+    modal_ampl[0] = 300e-9
     pos = zern2zonal.convert_modal_to_zonal(modal_ampl)
     pp._bmc.set_shape(pp._mcl.p2c(pos) + cmd_flat)
-    wf=pp._wavefront_on_cmask()
-    plt.imshow(wf-wf_flat)
+    wf = pp._wavefront_on_cmask()
+    plt.imshow(wf - wf_flat)
     plt.colorbar()
     plt.show()
     return pp, zern2zonal, wf_flat, cmd_flat
@@ -181,9 +176,6 @@ class Buttami():
         plt.title('Difference gen - exp Z%d' % j + ' fit err = %g m' %
                   expected_fitting_error, size=25)
         print('exp fit err: %g' % expected_fitting_error)
-
-
-
 
 
 class Prove220520():

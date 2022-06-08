@@ -1,7 +1,9 @@
-from tesi_ao import sandbox
+from tesi_ao import main220316
 import matplotlib.pyplot as plt
 import numpy as np
 from astropy.io import fits
+from tesi_ao.mems_command_to_position_linearization_measurer import CommandToPositionLinearizationMeasurer
+from tesi_ao.mems_command_to_position_linearization_analyzer import CommandToPositionLinearizationAnalyzer
 
 
 def _what_I_do_on_terminal():  # don't use!
@@ -22,9 +24,9 @@ def _what_I_do_on_terminal():  # don't use!
     iea.plot_interpolation_difference(mcls_int)
     # from the 'old' mcls elements, we need the interpolated functions
     # to compute p2c and save the a 'new' measured mcl object
-    iea.do_calibrated_measure(mcls_int, '_z3')
+    iea.do_calibrated_measure(mcls_int, '_f0')
     # load new mcl
-    mcls_meas = iea.load_calibrated_measure('_z3')
+    mcls_meas = iea.load_calibrated_measure('_f0')
     # Plot the difference between the measured and expected deflection, as a
     # function of the expected one
     rms_list = iea.plot_Measured_vs_Expected_common(mcls_meas, mcls_int)
@@ -48,9 +50,9 @@ class InterpolationErrorAnalyzer(object):
         '''
         act_list = [self.ACTUATOR]
 
-        wyko, bmc = sandbox.create_devices()
+        wyko, bmc = main220316.create_devices()
 
-        cplm = sandbox.CommandToPositionLinearizationMeasurer(wyko, bmc)
+        cplm = CommandToPositionLinearizationMeasurer(wyko, bmc)
 
         cplm.NUMBER_STEPS_VOLTAGE_SCAN = Nscan
 
@@ -64,7 +66,7 @@ class InterpolationErrorAnalyzer(object):
         interpolation function.
         Returns the related MemsCommandLinearization object.
         '''
-        cpla = sandbox.CommandToPositionLinearizationAnalyzer(fname)
+        cpla = CommandToPositionLinearizationAnalyzer(fname)
         mcl = cpla.compute_linearization()
 
         return mcl
@@ -79,13 +81,13 @@ class InterpolationErrorAnalyzer(object):
         f_int = mcl._finter[0]
 
         span = np.linspace(
-            min(mcl._deflection[0]), max(mcl._deflection[0]), Npt)
+            min(mcl._cmd_vector[0]), max(mcl._cmd_vector[0]), Npt)
 
-        plt.plot(f_int(span), span, '-', color=plt.gca().lines[-1].get_color())
+        plt.plot(span, f_int(span), '-', color=plt.gca().lines[-1].get_color())
 
-    def _get_common_deflection_range(self, mcl_list):
+    def _get_common_cmds_range(self, mcl_list):
         '''
-        Returns the extremes[a,b] of the common deflection domain
+        Returns the extremes[a,b] of the common cmd domain
         between all interpolated functions
         Input: list, mcl_list
         Returns: a, b
@@ -93,8 +95,18 @@ class InterpolationErrorAnalyzer(object):
         min_container = []
         max_container = []
         for mcl in mcl_list:
-            min_container.append(min(mcl._deflection[0]))
-            max_container.append(max(mcl._deflection[0]))
+            min_container.append(min(mcl._cmd_vector[0]))
+            max_container.append(max(mcl._cmd_vector[0]))
+        a = max(min_container)
+        b = min(max_container)
+        return a, b
+
+    def _get_common_deflections_range(self, mcl_list):
+        min_container = []
+        max_container = []
+        for mcl in mcl_list:
+            min_container.append(min(mcl._calibrated_position[0]))
+            max_container.append(max(mcl._calibrated_position[0]))
         a = max(min_container)
         b = min(max_container)
         return a, b
@@ -132,11 +144,11 @@ class InterpolationErrorAnalyzer(object):
         Plots all interpolated functions obtained by varying scan sampling,
         as a function of actuator's deflections.
         '''
-        plt.figure(101 + self.ACTUATOR)
+        plt.figure()
         plt.clf()
         plt.ion()
         plt.title('act#%d: interpolation functions for several scans' %
-                  self.ACTUATOR)
+                  self.ACTUATOR, size=25)
         for mcl in mcl_list:
             self._plot_interpolation_function(mcl)
 
@@ -156,15 +168,15 @@ class InterpolationErrorAnalyzer(object):
 
         # looking for the common deflections domain for the interpolated
         # functions
-        min_span, max_span = self._get_common_deflection_range(mcl_list)
+        min_span, max_span = self._get_common_cmds_range(mcl_list)
 
-        common_span_deflections = np.linspace(
+        common_span_cmds = np.linspace(
             min_span, max_span, Npt)
 
         # interpolated function with the biggest scans sampling
         f_ref = mcl_list[-1]._finter[0]
 
-        plt.figure(102 + self.ACTUATOR)
+        plt.figure()
         plt.clf()
         plt.ion()
         plt.title('act#%d:' % self.ACTUATOR +
@@ -172,13 +184,14 @@ class InterpolationErrorAnalyzer(object):
 
         for idx, scans in enumerate(self.NUM_SCAN_LIST):
             f_i = mcl_list[idx]._finter[0]
-            plt.plot(common_span_deflections, f_i(common_span_deflections) -
-                     f_ref(common_span_deflections), '.-', label='%d scans' % scans)
+            plt.plot(common_span_cmds, (f_i(common_span_cmds) -
+                                        f_ref(common_span_cmds)) / 1e-9, '.-', label='%d scans' % scans)
+            print((f_i(common_span_cmds) - f_ref(common_span_cmds)).std())
 
         plt.legend(loc='best')
         plt.grid()
-        plt.ylabel('Command Difference [au]', size=25)
-        plt.xlabel('Deflection [m]', size=25)
+        plt.ylabel('Deflection Difference [m]', size=25)
+        plt.xlabel('cmd [au]', size=25)
 
     def do_calibrated_measure(self, mcl_list, version):
         '''
@@ -194,14 +207,14 @@ class InterpolationErrorAnalyzer(object):
 
         act_list = [self.ACTUATOR]
 
-        wyko, bmc = sandbox.create_devices()
+        wyko, bmc = main220316.create_devices()
 
-        min_span, max_span = self._get_common_deflection_range(mcl_list)
-        expected_deflection = np.linspace(min_span, max_span, Npt)
+        min_span, max_span = self._get_common_deflections_range(mcl_list)
+        expected_deflection = np.linspace(max_span, min_span, Npt)
 
         # expected_deflection = np.linspace(-800e-9, 1600e-9, Npt) #@act63
 
-        converted_cmd = np.zeros((len(mcl_list), Npt))
+        #converted_cmd = np.zeros((len(mcl_list), Npt))
 
         for idx, mcl in enumerate(mcl_list):
             mcm = MyCalibrationMeasurer(wyko, bmc, mcl, expected_deflection)
@@ -222,6 +235,7 @@ class InterpolationErrorAnalyzer(object):
         for scans in self.NUM_SCAN_LIST:
             fname = self.fpath + '%d' % Npt + 'meas' + version + \
                 '_cal%d' % scans + self.ffmt
+
             mcl_list.append(self._get_mcl_from_file(fname))
 
         return mcl_list
@@ -236,7 +250,7 @@ class InterpolationErrorAnalyzer(object):
         '''
         Npt = self.test_points
 
-        plt.figure(556 + self.ACTUATOR)
+        plt.figure()
         plt.clf()
         min_span, max_span = self._get_common_deflection_range(mcl_int)
         #min_span = -800e-9
@@ -250,15 +264,15 @@ class InterpolationErrorAnalyzer(object):
             rms = y.std()
             rms = rms / 1.e-9
             rms_list.append(y.std())
-            plt.plot(x_exp, y, 'o-', label='%d scans' %
+            plt.plot(x_exp / 1.e-9, y / 1.e-9, 'o-', label='%d scans' %
                      self.NUM_SCAN_LIST[idx])
             print('rms = %g' % rms + 'nm\t' +
                   '(Sampling: %d scans)' % self. NUM_SCAN_LIST[idx])
 
         plt.legend(loc='best')
         plt.grid()
-        plt.xlabel('$x_{exp} [m]$', size=25)
-        plt.ylabel('$x_{obs} - x_{exp} [m]$', size=25)
+        plt.xlabel('$x_{exp} [nm]$', size=25)
+        plt.ylabel('$x_{obs} - x_{exp} [nm]$', size=25)
         plt.title('act#%d:' % self.ACTUATOR +
                   ' Error in deflection cmds for each interpolation functions Common', size=25)
         return rms_list
@@ -270,7 +284,7 @@ class InterpolationErrorAnalyzer(object):
         '''
         Npt = self.test_points
 
-        plt.figure(580 + self.ACTUATOR)
+        plt.figure()
         plt.clf()
         min_span, max_span = self._get_common_deflection_range(mcl_int)
         #min_span = -800e-9
@@ -295,6 +309,12 @@ class InterpolationErrorAnalyzer(object):
             print('Cov Matrix:')
             print(coeff_cov)
             fit_func = np.poly1d(coeff)
+            residuals = x_obs - fit_func(x_obs)
+            chi_2 = np.sum((residuals / sigma)**2)
+            print('Chi2 = %g' % chi_2)
+            dof = len(x_obs) - len(coeff)
+            chi2red = chi_2 / float(dof)
+            print('RedChi2 = %g' % chi2red)
             plt.plot(xx, fit_func(xx), '-', label='relative fit',
                      color=plt.gca().lines[-1].get_color())
             # plt.errorbar(x_exp, x_obs, sigma,
@@ -354,18 +374,37 @@ class MyCalibrationMeasurer(object):  # changes when bmc set shape
         self._wfs = np.ma.zeros(
             (n_acts_to_meas, self.NUMBER_STEPS_VOLTAGE_SCAN,
              wfflat.shape[0], wfflat.shape[1]))
+        N_pixels = self._wfs.shape[2] * self._wfs.shape[3]
 
         for act_idx, act in enumerate(self._actuators_list):
 
-            self._cmd_vector[act_idx] = self._mlc.p2c(
+            self._cmd_vector[act_idx] = self._mcl.linear_p2c(
                 act, self._exp_deflections)
-            for cmd_idx, cmdi in enumerate(self._cmd_vector[act_idx]):
-                print("Act:%d - command %g" % (act, cmdi))
+            for cmd_idx in range(len(self._cmd_vector[act_idx])):
+                print("Act:%d - command" % (act))
                 cmd = np.zeros(self._n_acts)
-                cmd[act] = cmdi
+                cmd[act] = self._mlc.linear_p2c(
+                    act, self._exp_deflections[cmd_idx])
                 self._bmc.set_shape(cmd)
                 self._wfs[act_idx, cmd_idx, :,
                           :] = self._get_wavefront_flat_subtracted()
+                masked_pixels = self._wfs[act_idx, cmd_idx].mask.sum()
+                masked_ratio = masked_pixels / N_pixels
+                if masked_ratio > 0.8227:
+                    print('Warning: Bad measure acquired for: act%d' %
+                          act_idx + ' cmd_idx %d' % cmd_idx)
+                    self._avoid_saturated_measures(
+                        masked_ratio, act_idx, cmd_idx, N_pixels)
+
+    def _avoid_saturated_measures(self, masked_ratio, act_idx, cmd_idx, N_pixels):
+
+        while masked_ratio > 0.8227:
+            self._wfs[act_idx, cmd_idx, :,
+                      :] = self._get_wavefront_flat_subtracted()
+            masked_pixels = self._wfs[act_idx, cmd_idx].mask.sum()
+            masked_ratio = masked_pixels / N_pixels
+
+        print('Repeated measure completed!')
 
     def _get_wavefront_flat_subtracted(self):
         dd = self._interf.wavefront(
