@@ -4,6 +4,7 @@ from scipy.optimize import fsolve
 from scipy.interpolate import interp1d
 from astropy.io import fits
 
+
 class MemsCommandLinearization():
 
     def __init__(self,
@@ -29,7 +30,6 @@ class MemsCommandLinearization():
     #         self._deflection[i], self._cmd_vector[i], kind='cubic')
     #         for i in range(self._cmd_vector.shape[0])]
     # prova
-
 
     def _create_interpolation(self):
         self._finter = [CubicSpline(self._cmd_vector[i], self._deflection[i], bc_type='natural')
@@ -63,7 +63,7 @@ class MemsCommandLinearization():
 
         cmd_vector = np.zeros(self._n_used_actuators)
         for idx, act in enumerate(self._actuators_list):
-            cmd_vector[idx] = self.linear_p2c(int(act), position_vector[idx])
+            cmd_vector[idx] = self._sampled_p2c(int(act), position_vector[idx])
 
         return cmd_vector
 
@@ -78,7 +78,6 @@ class MemsCommandLinearization():
             position_vector[idx] = self._finter[fidx](cmd_vector[idx])
 
         return position_vector
-        
 
     def _solve_p2c(self, act, p):
         '''
@@ -112,9 +111,11 @@ class MemsCommandLinearization():
         # avro una sensibilita dell ordine di 1.e-4 in tensione,ok
         if(pos > max_clipped_pos):
             idx_clipped_cmd = np.where(max_clipped_pos == pos_span)[0][0]
+            print('act%d reached max stroke' % act)
             return cmd_span[idx_clipped_cmd]
         if(pos < min_clipped_pos):
             idx_clipped_cmd = np.where(min_clipped_pos == pos_span)[0][0]
+            print('act%d reached min stroke' % act)
             return cmd_span[idx_clipped_cmd]
         else:
             pos_a = pos_span[pos_span <= pos].max()
@@ -141,8 +142,10 @@ class MemsCommandLinearization():
         min_clipped_pos = np.min(pos_span)
         if(pos > max_clipped_pos):
             idx_clipped_cmd = np.where(max_clipped_pos == pos_span)[0][0]
+            print('act%d reached max stroke' % act)
             return cmd_span[idx_clipped_cmd]
         if(pos < min_clipped_pos):
+            print('act%d reached min stroke' % act)
             idx_clipped_cmd = np.where(min_clipped_pos == pos_span)[0][0]
             return cmd_span[idx_clipped_cmd]
         else:

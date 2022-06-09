@@ -78,7 +78,7 @@ class Prove220531():
             -500e-9, 500e-9, self.number_of_actuators)
         self._bmc.set_shape(self._mcl.p2c(pos))
 
-    def create_reconstructor(self):
+    def create_reconstructor(self, set_thresh=0.25):
         '''
         costruisco la matrice di ricostruzione
         con la maschera specificata precedentemente
@@ -98,6 +98,7 @@ class Prove220531():
         # self.cmask = self.cmask_obj.mask()
         self._mzr = MemsZonalReconstructor(
             cmask=self.cmask, ifs_stroke=self.ppstroke, ifs=self.ifs)
+        self._mzr.THRESHOLD_RMS = set_thresh
         self.rec = self._mzr.reconstruction_matrix
         self.im = self._mzr.interaction_matrix
 
