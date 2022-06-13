@@ -60,7 +60,7 @@ class MemsCommandLinearization():
         assert len(position_vector) == self._n_used_actuators, \
             "Position vector should have %d elements, got %d" % (
                 self._n_used_actuators, len(position_vector))
-
+        self.clipping_vector = np.zeros(140)
         cmd_vector = np.zeros(self._n_used_actuators)
         for idx, act in enumerate(self._actuators_list):
             cmd_vector[idx] = self._sampled_p2c(int(act), position_vector[idx])
@@ -112,10 +112,12 @@ class MemsCommandLinearization():
         if(pos > max_clipped_pos):
             idx_clipped_cmd = np.where(max_clipped_pos == pos_span)[0][0]
             print('act%d reached max stroke' % act)
+            self.clipping_vector[idx] = 1
             return cmd_span[idx_clipped_cmd]
         if(pos < min_clipped_pos):
             idx_clipped_cmd = np.where(min_clipped_pos == pos_span)[0][0]
             print('act%d reached min stroke' % act)
+            self.clipping_vector[idx] = -1
             return cmd_span[idx_clipped_cmd]
         else:
             pos_a = pos_span[pos_span <= pos].max()
@@ -143,10 +145,12 @@ class MemsCommandLinearization():
         if(pos > max_clipped_pos):
             idx_clipped_cmd = np.where(max_clipped_pos == pos_span)[0][0]
             print('act%d reached max stroke' % act)
+            self.clipping_vector[idx] = 1
             return cmd_span[idx_clipped_cmd]
         if(pos < min_clipped_pos):
             print('act%d reached min stroke' % act)
             idx_clipped_cmd = np.where(min_clipped_pos == pos_span)[0][0]
+            self.clipping_vector[idx] = -1
             return cmd_span[idx_clipped_cmd]
         else:
             pos_a = pos_span[pos_span <= pos].max()
