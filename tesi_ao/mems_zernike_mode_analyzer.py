@@ -72,10 +72,11 @@ class MemsModeMeasurer():
         #self.wf = self.get_wavefront()
 
     def execute_amplitude_scan_for_zernike(self, j):
-        # amplitude_span = 1e-9 * \
-        #     np.array([10, 25, 50, 100, 300, 500, 800, 1000, 1250])
+        amplitude_span = 1e-9 * \
+            np.array([5, 10, 25, 50, 100, 300, 500,
+                      650, 800, 1000, 1250, 1500])
         self._j = j
-        amplitude_span = 1e-9 * np.array([100, 500, 1000])
+        #amplitude_span = 1e-9 * np.array([100, 500, 1000])
         self._amplitude_vector = np.append(-amplitude_span, amplitude_span)
         self._amplitude_vector.sort()
         num_of_meas = len(self._amplitude_vector)
@@ -180,7 +181,7 @@ class MemsAmplitudeLinearityAnalizer():
 
     def __init__(self, fname):
         self.wfs,  self.z_mode, self.exp_amp_vector, self.pos_vector, self._clip_vector, \
-            self.selected_act, self.mode_index,\
+            self.selected_acts, self.mode_index,\
             self._thres_rms = MemsModeMeasurer.load(fname)
 
     def get_measured_amplitudes(self):
@@ -196,6 +197,40 @@ class MemsAmplitudeLinearityAnalizer():
         for i in range(n_meas):
             fitting_error[i] = (
                 self.wfs[i] - self.exp_amp_vector[i] * self.z_mode).std()
+        return fitting_error
 
     def show_mode_linearity(self):
-        return 0
+        import matplotlib.pyplot as plt
+
+        y = self.get_measured_amplitudes()
+        sigma = self.get_measured_fitting_error()
+        x = self.get_expected_amplitudes()
+        sign = np.ones_like(y)
+        half = len(sign) * 0.5
+        sign[:int(half)] = -1
+        y = sign * y
+        plt.figure()
+        plt.clf()
+        plt.title('$Z_{%d}$' % self.mode_index + ' $thres = %g$' %
+                  self._thres_rms + ' (%d acts)' % len(self.selected_acts), size=25)
+        plt.xlabel('Expected Amplitude [nm]', size=20)
+        plt.ylabel('Measured Amplitude [nm]', size=20)
+
+        plt.plot(x / 1e-9, y / 1e-9, '-bo', label='Z%d' % self.mode_index)
+        plt.errorbar(x / 1e-9, y / 1e-9, sigma / 1e-9, ls=None)
+
+        idx_clip_modes = self.get_clipped_modes_index_list()
+        plt.plot(x[idx_clip_modes] / 1e-9, y[idx_clip_modes] /
+                 1e-9, 'ro', label='clipped')
+        plt.grid()
+        plt.legend(loc='best')
+
+    def get_clipped_modes_index_list(self):
+        n_meas = self.wfs.shape[0]
+        n_all_acts = self._clip_vector.shape[-1]
+        unclipped_vector = np.zeros(n_all_acts)
+        clip_mode_index = []
+        for idx in range(n_meas):
+            if((self._clip_vector[idx] == unclipped_vector).all() == False):
+                clip_mode_index.append(idx)
+        return clip_mode_index

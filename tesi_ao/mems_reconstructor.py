@@ -2,7 +2,7 @@ import numpy as np
 
 
 class MemsZonalReconstructor(object):
-    
+
     THRESHOLD_RMS = 0.25  # threshold for wf rms to select actuators outside the specified mask
 
     def __init__(self, cmask, ifs_stroke, ifs):
@@ -13,7 +13,7 @@ class MemsZonalReconstructor(object):
         self._ifs[:].mask = cmask
         self._ifs_stroke = ifs_stroke
         self._num_of_acts = ifs.shape[0]
-        
+
         self._normalize_influence_function()
         self._reset()
 
@@ -27,11 +27,9 @@ class MemsZonalReconstructor(object):
         self._build_interaction_matrix()
         self._build_reconstruction_matrix_via_pinv()
 
-
     def _get_svd(self):
         self.u, self.s, self.vh = np.linalg.svd(
             self.interaction_matrix, full_matrices=False)
-
 
     def _check_input_mask(self):
         '''
@@ -60,7 +58,6 @@ class MemsZonalReconstructor(object):
             self._build_interaction_matrix()
         return self._im
 
-
     def _build_reconstruction_matrix_via_pinv(self):
         self._rec = np.linalg.pinv(self.interaction_matrix)
 
@@ -79,7 +76,6 @@ class MemsZonalReconstructor(object):
         self._rec_svd = np.matmul(np.transpose(self.vh), np.multiply(
             s[..., np.newaxis], np.transpose(self.u)))
 
-
     def _build_valid_actuators_list(self):
         self._check_actuators_visibility_with_wf_rms()
         self._acts_in_pupil = np.where(
@@ -90,6 +86,18 @@ class MemsZonalReconstructor(object):
         for act in range(self._num_of_acts):
             self._rms_wf[act] = np.ma.array(data=self._ifs[act].data,
                                             mask=self.mask).std()
+
+    def _show_actuators_visibility(self):
+        import matplotlib.pyplot as plt
+        plt.figure()
+        plt.clf()
+        plt.ion()
+        plt.plot(self._rms_wf / 1.e-9, 'o', label='pushpull=%g' %
+                 self._ifs_stroke)
+        plt.xlabel('#N actuator', size=25)
+        plt.ylabel('Wavefront rms [nm]', size=25)
+        plt.grid()
+        plt.legend(loc='best')
 
     @property
     def selected_actuators(self):
