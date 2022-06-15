@@ -13,7 +13,7 @@ class ZonalInfluenceFunctionMeasurer(object):
         self._bmc = mems_deformable_mirror
         self._num_of_acts = self._bmc.get_number_of_actuators()
         if mcl_fname is None:
-            mcl_fname = 'prova/all_act/sandbox/mcl_all_fixedpix.fits'
+            mcl_fname = 'prova/misure_ripetute/mcl_all_def.fits'
         self._mcl = MemsCommandLinearization.load(mcl_fname)
 
     def execute_ifs_measure(self, pos, actuators_list=None):

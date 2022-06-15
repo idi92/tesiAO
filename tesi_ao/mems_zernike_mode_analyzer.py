@@ -225,6 +225,29 @@ class MemsAmplitudeLinearityAnalizer():
         plt.grid()
         plt.legend(loc='best')
 
+    # def show_fitting_error_pattern(self):
+    #     import matplotlib.pyplot as plt
+    #     y = self.get_measured_fitting_error()
+    #     x = self.get_expected_amplitudes()
+    #     #x = self.get_measured_amplitudes()
+    #     sign = np.ones_like(y)
+    #     half = len(sign) * 0.5
+    #     sign[:int(half)] = -1
+    #     #y = sign * y
+    #     #x = sign * x
+    #     plt.figure()
+    #     plt.clf()
+    #     plt.title('$Z_{%d}$' % self.mode_index + ' $thres = %g$' %
+    #               self._thres_rms + ' (%d acts)' % len(self.selected_acts), size=25)
+    #     plt.xlabel('Measured Amplitude [nm]', size=20)
+    #     plt.ylabel('Fitting error rms [nm]', size=20)
+    #     plt.plot(x / 1e-9, y / 1e-9, '-bo', label='Z%d' % self.mode_index)
+    #     idx_clip_modes = self.get_clipped_modes_index_list()
+    #     plt.plot(x[idx_clip_modes] / 1e-9, y[idx_clip_modes] /
+    #              1e-9, 'ro', label='clipped')
+    #     plt.grid()
+    #     plt.legend(loc='best')
+
     def get_clipped_modes_index_list(self):
         n_meas = self.wfs.shape[0]
         n_all_acts = self._clip_vector.shape[-1]

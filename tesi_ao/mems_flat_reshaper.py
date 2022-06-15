@@ -20,6 +20,7 @@ class MemsFlatReshaper():
             ifs_fname)
         self.ifs_mask = self.ifs[0].mask
         self._wyko, self._bmc = create_devices()
+        self._rand_pos = 0
 
     def create_mask(self, radius=120, center=(231, 306)):
         '''
@@ -87,6 +88,14 @@ class MemsFlatReshaper():
     def number_of_actuators(self):
         return self._bmc.get_number_of_actuators()
 
+    @property
+    def number_of_selected_actuators(self):
+        return self._mzr.number_of_selected_actuators
+
+    @property
+    def selected_actuators(self):
+        return self._mzr.selected_actuators
+
     def _check_wavefront_mask_is_in_cmask(self, wf_mask):
         intersection_mask = np.ma.mask_or(wf_mask, self.cmask)
         assert (intersection_mask == self.cmask).all(
@@ -108,6 +117,7 @@ class MemsFlatReshaper():
         pos = np.random.uniform(
             -stroke, stroke, self.number_of_actuators)
         self._bmc.set_shape(self._mcl.p2c(pos))
+        self._rand_pos = stroke
 
     def _apply_rand_only_on_selected_acts(self, stroke=500e-9):
         '''
@@ -118,8 +128,7 @@ class MemsFlatReshaper():
             pos[act] = np.random.uniform(
                 -stroke, stroke)
         self._bmc.set_shape(self._mcl.p2c(pos))
-
-        return 0
+        self._rand_pos = stroke
 
     def do_some_statistic(self, distorted_wf, n_of_flattening_steps=10):
         n_meas = n_of_flattening_steps + 1
@@ -136,8 +145,8 @@ class MemsFlatReshaper():
 
     def save_stats(self, fname):
         hdr = fits.Header()
-        hdr['STROKE'] = self._pos
-        # hdr['R'] = self.cmask_obj.radius()
+        hdr['STROKE'] = self._rand_pos
+        hdr['THRES'] = self._mzr.THRESHOLD_RMS
         # hdr['CENTER'] = self.cmask_obj.center()
         fits.writeto(fname, self.wf_meas.data, hdr)
         fits.append(fname, self.wf_meas.mask.astype(int))
@@ -152,6 +161,6 @@ class MemsFlatReshaper():
         wfs_meas = np.ma.masked_array(data=wfmeas_data, mask=wfmeas_mask)
         cmd_vector = hduList[2].data
         rand_stroke = header['STROKE']
-        # cmask_radius = header['R']
+        thres = header['THRES']
         # cmask_center = header['CENTER']
-        return wfs_meas, cmd_vector, rand_stroke  # ,cmask_center
+        return wfs_meas, cmd_vector, rand_stroke, thres
