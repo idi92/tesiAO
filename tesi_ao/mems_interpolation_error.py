@@ -66,10 +66,10 @@ class InterpolationErrorAnalyzer():
     def _plot_interpolation_function(self, mcl):
         import matplotlib.pyplot as plt
 
-        plt.plot(mcl._cmd_vector[0], mcl._deflection[0], 'o',
+        plt.plot(mcl._cmd_vector[0], mcl._deflection[0] / 1e-9, '.',
                  label='%d scans' % mcl._cmd_vector.shape[1])
 
-        plt.plot(mcl._calibrated_cmd[0], mcl._calibrated_position[0],
+        plt.plot(mcl._calibrated_cmd[0], mcl._calibrated_position[0] / 1e-9,
                  '-', color=plt.gca().lines[-1].get_color())
 
     def show_all_interpolation_functions(self, mcl_list):
@@ -82,12 +82,12 @@ class InterpolationErrorAnalyzer():
         plt.clf()
         plt.ion()
         plt.title('act#%d: interpolation functions for several scans' %
-                  self.act, size=25)
+                  self.act, size=15)
         for mcl in mcl_list:
             self._plot_interpolation_function(mcl)
 
-        plt.xlabel('Commands [au]', size=25)
-        plt.ylabel('Deflection [m]', size=25)
+        plt.xlabel('Commands [au]', size=15)
+        plt.ylabel('Deflection [nm]', size=15)
         plt.grid()
         plt.legend(loc='best')
 
@@ -97,20 +97,20 @@ class InterpolationErrorAnalyzer():
         plt.clf()
         plt.ion()
         plt.title('act#%d:' % self.act +
-                  'cubic spline interpolation error w-r-t %dscans' % max(self.scan_list), size=25)
+                  'cubic spline interpolation error w-r-t %dscans' % max(self.scan_list), size=15)
         mcl_ref = mcl_list[-1]
         for idx, scans in enumerate(self.scan_list):
             mcl = mcl_list[idx]
             dpos = mcl._calibrated_position[0] - \
                 mcl_ref._calibrated_position[0]
             plt.plot(mcl._calibrated_cmd[0], dpos /
-                     1e-9, '.-', label='%d scans' % scans)
+                     1e-9, '-', label='%d scans' % scans)
             print(dpos.std())
 
         plt.legend(loc='best')
         plt.grid()
-        plt.ylabel('Deflection Difference [m]', size=25)
-        plt.xlabel('cmd [au]', size=25)
+        plt.ylabel('Deflection Difference [nm]', size=15)
+        plt.xlabel('Commands [au]', size=15)
 
     def _get_common_position_range(self):
         mcl_list = self.load_multiple_scans_interpolation()
@@ -174,16 +174,6 @@ class InterpolationErrorAnalyzer():
         act = header['ACT']
         return expected_pos, measured_pos_vector, n_scan, act
 
-    def _test_plot_lin(self):
-        import matplotlib.pyplot as plt
-        plt.figure()
-        plt.clf()
-        plt.title('act%d' % self.act, size=25)
-        plt.plot(self.expected_pos / 1e-9, self.measured_pos / 1e-9, 'o-')
-        plt.xlabel('exp pos [nm]')
-        plt.ylabel('meas pos [nm]')
-        plt.grid()
-
     def _max_wavefront(self, wf):
         coord_max = np.argwhere(np.abs(wf) == np.max(np.abs(wf)))[0]
         y, x = coord_max[0], coord_max[1]
@@ -225,12 +215,20 @@ class LinearityResponseAnalyzer():
 
         plt.figure()
         plt.clf()
-        plt.plot(x, y, 'b-', label='data act%d' % self.act)
-        plt.errorbar(x, y, yerr, ls=None, marker=None)
-        plt.xlabel('Expexted position [nm]', size=20)
-        plt.ylabel('Measured position [nm]', size=20)
-        plt.title('Linear Response act%d' % self.act)
+        plt.plot(x, y, 'b.', markersize=0.5, label='data')
+        plt.errorbar(x, y, 10 * yerr, ls=None,
+                     fmt='.', markersize=0.5, label='$10\sigma$')
+        plt.xlabel('$x_{exp} [nm]$', size=15)
+        plt.ylabel('$x_{meas} [nm]$', size=15)
+        plt.title('Actuator %d' % self.act, size=15)
         plt.grid()
+
+        a, b, chisq = self.execute_fit()
+
+        def func(data, a, b):
+            return a * data + b
+        plt.plot(x, func(x, a[0], a[1]), '-r', lw=0.5, label='fit')
+        plt.legend(loc='best')
 
     def show_data(self):
         import matplotlib.pyplot as plt
@@ -241,10 +239,10 @@ class LinearityResponseAnalyzer():
         plt.figure()
         plt.clf()
         for idx in range(y.shape[0]):
-            plt.plot(x, y[idx] / 1e-9, 'o-', label='data act%d' % self.act)
-        plt.xlabel('Expected position [nm]', size=20)
-        plt.ylabel('Measured position [nm]', size=20)
-        plt.title('Linear Response act%d' % self.act)
+            plt.plot(x, y[idx] / 1e-9, '.', label='data')
+        plt.xlabel('$x_{exp} [nm]$', size=15)
+        plt.ylabel('$x_{meas} [nm]$', size=15)
+        plt.title('Actuator %d' % self.act, size=15)
         plt.grid()
 
     def show_meas_vs_exp(self):
@@ -256,16 +254,18 @@ class LinearityResponseAnalyzer():
         plt.figure()
         plt.clf()
         for idx in range(y.shape[0]):
-            plt.plot(x, y[idx] / 1e-9 - x, 'o-', label='data act%d' % self.act)
-        plt.xlabel('Expected position [nm]', size=20)
-        plt.ylabel('Meas - Exp [nm]', size=20)
-        plt.title('Linear Response act%d' % self.act)
+            plt.plot(x, y[idx] / 1e-9 - x, '.-', label='data act%d' % self.act)
+        plt.xlabel('$x_{exp} [nm]$', size=15)
+        plt.ylabel('$x_{meas} - x_{exp} [nm]$', size=15)
+        plt.title('Actuator %d' % self.act, size=15)
         plt.grid()
 
     def execute_fit(self):
         x = self.get_expected_deflections / 1e-9
         y = self.get_mean_deflections / 1e-9
         yerr = self.get_std_deflections / 1e-9
+        # yerr = (self.measured_pos_vector.max(axis=0) -
+        #         self.measured_pos_vector.min(axis=0)) * 0.5
 
         def func(data, a, b):
             return a * data + b
@@ -276,6 +276,28 @@ class LinearityResponseAnalyzer():
         chisq = sum((res / yerr)**2)
 
         return par, cov, chisq
+
+    def show_meas_vs_fit(self):
+        import matplotlib.pyplot as plt
+
+        a, b, chisq = self.execute_fit()
+        x = self.get_expected_deflections / 1e-9
+        y = self.get_mean_deflections / 1e-9
+        yerr = self.get_std_deflections / 1e-9
+
+        def func(data, a, b):
+            return a * data + b
+        plt.figure()
+        plt.clf()
+        plt.errorbar(x, y - x, yerr, fmt='o', ls=None, label='$\sigma$')
+        plt.plot(x, y - func(x, a[0], a[1]), 'or', label='fitting residual')
+        plt.legend(loc='best')
+        plt.grid()
+        plt.xlabel('$x_{exp}$\t [nm]', size=15)
+        plt.ylabel('$\epsilon_{x}$\t [nm]', size=15)
+        # for idx in range(self.measured_pos_vector.shape[0]):
+        #     plt.plot(
+        # x, self.measured_pos_vector[idx] / 1e-9 - x, '.', label='data')
 
     @property
     def get_mean_deflections(self):

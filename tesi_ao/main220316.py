@@ -172,7 +172,7 @@ def _plot_all_int_funcs(mcl):
         a = np.min(mcl._cmd_vector[act])
         b = np.max(mcl._cmd_vector[act])
         vv = np.linspace(a, b, 1000)
-        plt.plot(vv, mcl._finter[act](vv) / 1.e-9, '.-', label='finter')
+        plt.plot(vv, mcl._finter[act](vv) / 1.e-9, '-', label='finter')
     plt.xlabel('Command [au]', size=25)
     plt.ylabel('Deflection [nm]', size=25)
     plt.title('Calibration curve per actuator', size=25)

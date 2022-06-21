@@ -240,9 +240,7 @@ class Flat_Analyzer(object):
         rms_map = np.ma.empty_like(self._wfs.data[:, 0])
 
         for act in np.arange(self._wfs.shape[0]):
-            for yi in np.arange(self._wfs.shape[2]):
-                for xi in np.arange(self._wfs.shape[3]):
-                    rms_map[act, yi, xi] = self._wfs[act, :, yi, xi].std()
+            rms_map[act] = self._wfs[act].std(axis=0)
 
         return CollapsedMap(rms_map, self._actuators_list, self._num_of_measures)
 
@@ -251,10 +249,7 @@ class Flat_Analyzer(object):
         mean_map = np.ma.empty_like(self._wfs.data[:, 0])
 
         for act in np.arange(self._wfs.shape[0]):
-            for yi in np.arange(self._wfs.shape[2]):
-                for xi in np.arange(self._wfs.shape[3]):
-                    mean_map[act, yi, xi] = self._wfs[act, :, yi, xi].mean()
-
+            mean_map[act] = self._wfs[act].mean(axis=0)
         return CollapsedMap(mean_map, self._actuators_list, self._num_of_measures)
 
 
