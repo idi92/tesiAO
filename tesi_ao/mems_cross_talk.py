@@ -105,13 +105,28 @@ class CrossTalkAnalyzer():
         plt.figure()
         plt.clf()
         plt.plot(self.wfs[central_act_idx, yc, :] /
-                 1e-9, label='%d' % self.central_act)
+                 1e-6, label='%d' % self.central_act)
         plt.plot(self.wfs[0, yc, :] /
-                 1e-9, '--', label='%d' % self.act_list[0])
+                 1e-6, '--', label='%d' % self.act_list[0])
         plt.plot(self.wfs[-1, yc, :] /
-                 1e-9, '--', label='%d' % self.act_list[-1])
-        plt.xlabel('pixels along x axis', size=15)
-        plt.ylabel('Stroke [nm]', size=15)
+                 1e-6, '--', label='%d' % self.act_list[-1])
+        plt.xlabel('pixels along x axis', size=10)
+        plt.ylabel('Stroke [$\mu$m]', size=10)
+
+        y_prev, x_prev = self.get_act_stroke_coord_from_wf(
+            self.wfs[0])
+        vline_max = self.wfs[0, yc, :].max() / 1e-6
+        vline_min = self.wfs[0, yc, :].min() / 1e-6
+        plt.vlines(x_prev, vline_min, vline_max,
+                   colors='r', linestyles='--', linewidth=0.8, alpha=0.5)
+
+        y_foll, x_foll = self.get_act_stroke_coord_from_wf(
+            self.wfs[-1])
+        vline_max = self.wfs[-1, yc, :].max() / 1e-6
+        vline_min = self.wfs[-1, yc, :].min() / 1e-6
+        plt.vlines(x_foll, vline_min, vline_max,
+                   colors='g', linestyles='--', linewidth=0.8)
+
         plt.legend(loc='best')
         plt.grid()
 
@@ -123,13 +138,28 @@ class CrossTalkAnalyzer():
         plt.figure()
         plt.clf()
         plt.plot(self.wfs[central_act_idx, :, xc] /
-                 1e-9, label='%d' % self.central_act)
+                 1e-6, label='%d' % self.central_act)
         plt.plot(self.wfs[central_act_idx - 1, :, xc] /
-                 1e-9, '--', label='%d' % self.act_list[central_act_idx - 1])
+                 1e-6, 'r--', label='%d' % self.act_list[central_act_idx - 1])
         plt.plot(self.wfs[central_act_idx + 1, :, xc] /
-                 1e-9, '--', label='%d' % self.act_list[central_act_idx + 1])
-        plt.xlabel('pixels along y axis', size=15)
-        plt.ylabel('Stroke [nm]', size=15)
+                 1e-6, 'm--', label='%d' % self.act_list[central_act_idx + 1])
+        plt.xlabel('pixels along y axis', size=10)
+        plt.ylabel('Stroke [$\mu$m]', size=10)
+
+        y_prev, x_prev = self.get_act_stroke_coord_from_wf(
+            self.wfs[central_act_idx + 1])
+        vline_max = self.wfs[central_act_idx + 1, :, xc].max() / 1e-6
+        vline_min = self.wfs[central_act_idx + 1, :, xc].min() / 1e-6
+        plt.vlines(y_prev, vline_min, vline_max,
+                   colors='m', linestyles='--', linewidth=0.8)
+
+        y_foll, x_foll = self.get_act_stroke_coord_from_wf(
+            self.wfs[central_act_idx - 1])
+        vline_max = self.wfs[central_act_idx - 1, :, xc].max() / 1e-6
+        vline_min = self.wfs[central_act_idx - 1, :, xc].min() / 1e-6
+        plt.vlines(y_foll, vline_min, vline_max,
+                   colors='r', linestyles='--', linewidth=0.8)
+
         plt.legend(loc='best')
         plt.grid()
 
