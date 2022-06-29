@@ -7,6 +7,8 @@ from tesi_ao.mems_flat_stability import FlatStabilityAnalyzer
 from tesi_ao.mems_flat_reshaper import MemsFlatReshaper
 from tesi_ao.mems_max_stoke_coupling import CouplingMeasurer
 from tesi_ao.mems_display import Boston140Display
+from tesi_ao.mems_reconstructor import MemsZonalReconstructor
+from tesi_ao.mems_zonal_influence_functions_measurer import ZonalInfluenceFunctionMeasurer
 
 
 class Chap3():
@@ -218,6 +220,109 @@ class Chap3():
         plt.xlabel('flattening iterations', size=10)
         plt.ylabel('Surface amplitude rms [nm]', size=10)
         final_ampls = flatten_data.mean(axis=2)[:, :, 2:]
+        print('starting amplitude for wfstart_idx=%d:' % j_idx)
+        print(data[:, j_idx, 0] / 1e-9)
+        print(yerr[:, j_idx, 0] / 1e-9)
+
         print('convergence amplitude for wfstart_idx=%d:' % j_idx)
-        print(final_ampls.mean(axis=2)[:, j])
-        print(final_ampls.std(axis=2)[:, j])
+        print(final_ampls.mean(axis=2)[:, j] / 1e-9)
+        print(final_ampls.std(axis=2)[:, j] / 1e-9)
+        print('All in nm!')
+
+    def show_exemples_of_flatten_wfs(self):
+        import matplotlib.pyplot as plt
+        mfr = MemsFlatReshaper()
+        mfr.load_acquired_measures_4plot()
+        wfs = mfr.wfs_meas
+
+        def do_plot(wf_input, wf_output):
+            print('a_in = %g' % wf_input.std())
+            print('a_out = %g' % wf_output.std())
+            plt.figure()
+            plt.clf()
+            plt.imshow(wf_input / 1e-6)
+            plt.colorbar(label='[$\mu$m]')
+            plt.figure()
+            plt.clf()
+            plt.imshow(wf_output / 1e-9)
+            plt.colorbar(label='[nm]')
+
+        print('input surface (1000nm rand):')
+        print('selected 140 acts:')
+        wf_input = wfs[0, -1, 6, 0]
+        wf_output = wfs[0, -1, 6, 5]
+        do_plot(wf_input, wf_output)
+        print('selected 80 acts:')
+        wf_input = wfs[2, -1, 7, 0]
+        wf_output = wfs[2, -1, 7, 4]
+        do_plot(wf_input, wf_output)
+        print('selected 64 acts:')
+        wf_input = wfs[4, -1, 0, 0]
+        wf_output = wfs[4, -1, 0, 9]
+        do_plot(wf_input, wf_output)
+
+        print('output surface (flat_cmd):')
+        print('selected 80 acts:')
+        wf_input = wfs[2, 0, 0, 0]
+        wf_output = wfs[2, 0, 0, -1]
+        do_plot(wf_input, wf_output)
+
+    def display_selected_actuators(self, visibility_threshold=0.15):
+        import matplotlib.pyplot as plt
+        mfr = MemsFlatReshaper()
+        mfr.create_mask(radius=120, center=(231, 306))
+        mfr.create_reconstructor(set_thresh=visibility_threshold)
+        actuators = np.zeros(mfr.number_of_actuators)
+        selected_acts = mfr.selected_actuators
+        actuators[selected_acts] = 1
+        n_of_selected_acts = len(selected_acts)
+        dis = Boston140Display()
+        plt.figure()
+        plt.clf()
+        plt.imshow(dis.map(actuators))
+        print('visibility threshold set to:%g' % visibility_threshold)
+        print('selected acts:%d' % n_of_selected_acts)
+
+    def show_ifs_visibility_on_pupil(self, visibility_threshold=0.15):
+        import matplotlib.pyplot as plt
+        mfr = MemsFlatReshaper()
+        mfr.create_mask(radius=120, center=(231, 306))
+        mfr.create_reconstructor(set_thresh=visibility_threshold)
+        mfr._mzr._show_actuators_visibility()
+
+    def show_normalized_zifs_for_act(self, act=76):
+        import matplotlib.pylab as plt
+        mfr = MemsFlatReshaper()
+        mfr.create_mask()
+        mfr.create_reconstructor()
+        ifs = mfr._mzr._ifs
+        norm_ifs = mfr._mzr._normalized_ifs
+        plt.figure()
+        plt.clf()
+        plt.imshow(ifs[act] / 1e-9)
+        plt.colorbar(label='[nm]')
+        # plt.figure()
+        # plt.clf()
+        # plt.imshow(norm_ifs[act])
+        # plt.colorbar(label='normalized')
+        coord_max = np.argwhere(
+            np.abs(norm_ifs[act]) == np.max(np.abs(norm_ifs[act])))[0]
+        y, x = coord_max[0], coord_max[1]
+        plt.figure()
+        plt.clf()
+        plt.imshow(norm_ifs[act, y - 50:y + 50, x - 50:x + 50])
+        plt.colorbar(label='normalized')
+        plt.figure()
+        plt.clf()
+        plt.imshow(ifs[act, y - 50:y + 50, x - 50:x + 50] / 1e-9)
+        plt.colorbar(label='[nm]')
+
+        plt.figure()
+        plt.clf()
+        plt.plot(norm_ifs[act, y, x - 60:x + 60])
+        plt.xlabel('roi pixels along x axis', size=10)
+
+        plt.figure()
+        plt.clf()
+        plt.plot(norm_ifs[act, y - 60:y + 60, x])
+        plt.xlabel('roi pixels along y axis', size=10)

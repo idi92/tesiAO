@@ -3,7 +3,7 @@ import numpy as np
 
 class MemsZonalReconstructor(object):
 
-    THRESHOLD_RMS = 0.25  # threshold for wf rms to select actuators outside the specified mask
+    THRESHOLD_RMS = 0.15  # threshold for wf rms to select actuators outside the specified mask
 
     def __init__(self, cmask, ifs_stroke, ifs):
         self._cmask = cmask
@@ -92,12 +92,23 @@ class MemsZonalReconstructor(object):
         plt.figure()
         plt.clf()
         plt.ion()
-        plt.plot(self._rms_wf / 1.e-9, 'o', label='pushpull=%g' %
+        plt.plot(self._rms_wf / 1.e-9, 'o', label='push/pull %g m' %
                  self._ifs_stroke)
-        plt.xlabel('#N actuator', size=25)
-        plt.ylabel('Wavefront rms [nm]', size=25)
+        plt.xlabel('# actuator', size=10)
+        plt.ylabel('Surface rms [nm]', size=10)
         plt.grid()
         plt.legend(loc='best')
+
+        fig, ax1 = plt.subplots()
+
+        ax2 = ax1.twinx()
+        ax1.plot(self._rms_wf / 1.e-9, '.', label='push/pull %g m' %
+                 self._ifs_stroke)
+        ax2.plot(self._rms_wf / self._rms_wf.max(), '.')
+
+        ax1.set_xlabel('# actuators', size=10)
+        ax1.set_ylabel('Surface rms [nm]', size=10)
+        ax2.set_ylabel('Normalized surface rms', size=10)
 
     @property
     def selected_actuators(self):

@@ -49,7 +49,7 @@ class MemsFlatReshaper():
         print(self.cmask_obj)
         self.cmask = self.cmask_obj.mask()
 
-    def create_reconstructor(self, set_thresh=0.25):
+    def create_reconstructor(self, set_thresh=0.15):
         '''
         costruisco la matrice di ricostruzione
         con la maschera specificata precedentemente
@@ -189,6 +189,8 @@ class MemsFlatReshaper():
         self.flatten_data = np.zeros((n_thres, n_start_wf, n_times, n_points))
         self.thres_list = np.zeros(n_thres)
         self.pos_list = np.zeros(n_start_wf)
+        self.wfs_meas = np.ma.zeros(
+            (n_thres, n_start_wf, n_times, n_points, 486, 640))
         for idx_thres, folder in enumerate(thres_label):
             for idx_wf, wfstart in enumerate(start_wf_label):
                 for t in range(n_times):
@@ -196,6 +198,7 @@ class MemsFlatReshaper():
                         '_thres' + folder + '_time%d' % t + '.fits'
                     wfs_meas, cmd_vector, rand_stroke, thres = MemsFlatReshaper.load_stat(
                         fname)
+                    self.wfs_meas[idx_thres, idx_wf, t] = wfs_meas
                     self.flatten_data[idx_thres, idx_wf,
                                       t] = wfs_meas.std(axis=(1, 2))
                 self.pos_list[idx_wf] = rand_stroke

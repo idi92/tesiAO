@@ -46,7 +46,7 @@ class MemsModeMeasurer():
         print(self.cmask_obj)
         self.cmask = self.cmask_obj.mask()
 
-    def create_reconstructor(self, set_thresh=0.25):
+    def create_reconstructor(self, set_thresh=0.15):
         '''
         costruisco la matrice di ricostruzione
         con la maschera specificata precedentemente
@@ -91,10 +91,19 @@ class MemsModeMeasurer():
         for idx, aj in enumerate(self._amplitude_vector):
             print('aj = %g' % aj)
             self._bmc.set_shape(cmd_flat)
-            wf_flat = self.get_wavefront()
+            try:
+                wf_flat = self.get_wavefront()
+            except AssertionError:
+                wf_flat = self.get_wavefront()
+
             self.apply_zernike(j, aj)
             self._check_clipped_acts[idx] = self._mcl.clipping_vector
-            self.wfs[idx] = self.get_wavefront() - wf_flat
+            try:
+                actual_wf = self.get_wavefront()
+            except AssertionError:
+                actual_wf = np.ma.array(data=np.zeros(
+                    frame_shape), mask=np.ones(frame_shape, dtype=np.bool))
+            self.wfs[idx] = actual_wf - wf_flat
             self._pos_vector[idx] = self.pos
             self._bmc.set_shape(cmd_flat)
 
@@ -198,6 +207,31 @@ class MemsAmplitudeLinearityAnalizer():
             fitting_error[i] = (
                 self.wfs[i] - self.exp_amp_vector[i] * self.z_mode).std()
         return fitting_error
+
+    def show_fitting_map(self, amp_index):
+
+        aj = self.get_expected_amplitudes()[amp_index]
+        expected_wf = aj * self.z_mode / 1e-9
+        measured_wf = self.wfs[amp_index] / 1e-9
+        fitting_error_map = measured_wf - expected_wf
+        import matplotlib.pyplot as plt
+        plt.figure()
+        plt.clf()
+        plt.imshow(measured_wf)
+        plt.colorbar()
+        plt.figure()
+        plt.clf()
+        plt.imshow(fitting_error_map)
+        plt.colorbar(label='[nm]')
+        plt.figure()
+        plt.clf()
+        plt.plot(fitting_error_map[231, :])
+        plt.plot(fitting_error_map[:, 306])
+        plt.plot(expected_wf[231, :])
+        plt.plot(expected_wf[:, 306])
+        plt.plot(measured_wf[231, :])
+        plt.plot(measured_wf[:, 306])
+        plt.grid()
 
     def show_mode_linearity(self):
         import matplotlib.pyplot as plt
