@@ -326,3 +326,34 @@ class Chap3():
         plt.clf()
         plt.plot(norm_ifs[act, y - 60:y + 60, x])
         plt.xlabel('roi pixels along y axis', size=10)
+        print(y, x)
+
+    def show_example_zifmeas_process(self):
+        import matplotlib.pylab as plt
+        fname = 'prova/example_zifm_meas_pushpull500nm_act76.fits'
+        stroke, act_list, wfs_pos, wfs_neg, wfs_zero = ZonalInfluenceFunctionMeasurer._load_meas(
+            fname)
+        act = act_list[0]
+        wfp = wfs_pos[act] - wfs_zero[act]
+        wfn = wfs_neg[act] - wfs_zero[act]
+        coord_max = np.argwhere(
+            np.abs(wfp) == np.max(np.abs(wfp)))[0]
+        yp, xp = coord_max[0], coord_max[1]
+        coord_max = np.argwhere(
+            np.abs(wfn) == np.max(np.abs(wfn)))[0]
+        yn, xn = coord_max[0], coord_max[1]
+
+        plt.figure()
+        plt.imshow(wfp[yp - 50: yp + 50, xp - 50: xp + 50] / 1e-9)
+        plt.colorbar(label='[nm]')
+        plt.figure()
+        plt.imshow(wfn[yn - 50: yn + 50, xn - 50: xn + 50] / 1e-9)
+        plt.colorbar(label='[nm]')
+        dd = wfp - wfn
+        wf_ifs = (dd - np.ma.median(dd))
+        coord_max = np.argwhere(
+            np.abs(wfn) == np.max(np.abs(wfn)))[0]
+        y, x = coord_max[0], coord_max[1]
+        plt.figure()
+        plt.imshow(0.5 * wf_ifs[y - 50: y + 50, x - 50: x + 50] / stroke)
+        plt.colorbar()

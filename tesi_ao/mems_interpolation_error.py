@@ -121,7 +121,7 @@ class InterpolationErrorAnalyzer():
             max_container.append(max(mcl._calibrated_position[0]))
         min_pos = max(min_container)
         max_pos = min(max_container)
-        return np.linspace(min_pos, max_pos, self.n_points)
+        return np.linspace(max_pos, min_pos, self.n_points)
 
     def execute_linear_measure(self, mcl, exp_pos=None):
         if exp_pos is None:
@@ -144,8 +144,10 @@ class InterpolationErrorAnalyzer():
             wf_meas = self._wyko.wavefront(timeout_in_sec=10)
             wf_sub = wf_meas - wf_flat
             wf_sub = wf_sub - np.ma.median(wf_sub)
+            if idx == 0:
+                wf_ref = wf_sub
             self._bmc.set_shape(cmd_flat)
-            self.measured_pos[idx] = self._max_wavefront(wf_sub)
+            self.measured_pos[idx] = self._max_wavefront(wf_sub, wf_ref)
 
         return self.measured_pos
 
@@ -174,8 +176,8 @@ class InterpolationErrorAnalyzer():
         act = header['ACT']
         return expected_pos, measured_pos_vector, n_scan, act
 
-    def _max_wavefront(self, wf):
-        coord_max = np.argwhere(np.abs(wf) == np.max(np.abs(wf)))[0]
+    def _max_wavefront(self, wf, wf_ref):
+        coord_max = np.argwhere(np.abs(wf_ref) == np.max(np.abs(wf_ref)))[0]
         y, x = coord_max[0], coord_max[1]
         list_to_avarage = []
         # avoid masked data
