@@ -1000,7 +1000,7 @@ class TestRepeatedMeasures():
         print('Creating mcl object...')
         self._mcl = MemsCommandLinearization(
             act_list, self._Ncpla_cmd_vector[0], self._deflection_mean, self._bmc.get_reference_shape_tag())
-        self._mcl.save(self.fpath + 'mcl_all_mod' + self.ffmt)
+        self._mcl.save(self.fpath + 'mcl_all_mod_220701' + self.ffmt)
         print('mcl object saved!')
 
     def _collapse_all_measured_wfs(self, act_list, n_steps_volt_scan, Ntimes):

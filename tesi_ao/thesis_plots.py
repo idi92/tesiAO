@@ -116,9 +116,10 @@ class Chap3():
         #plt.title('Calibration curve per actuator', size=15)
         plt.grid()
 
-    def display_acts_ptv_calibrations(self):
+    def display_acts_ptv_calibrations(self, mcl=None):
         import matplotlib.pyplot as plt
-        mcl = self.mcl
+        if mcl is None:
+            mcl = self.mcl
         peak = mcl._deflection.max(axis=1)
         valley = mcl._deflection.min(axis=1)
         pos = peak - valley
@@ -127,6 +128,22 @@ class Chap3():
         plt.clf()
         plt.imshow(dis.map(pos) / 1e-6)
         plt.colorbar(label='peak to valley stroke [$\mu$m]')
+
+    def display_acts_ptv_difference_between_calibration(self, mcl_odd):
+        import matplotlib.pyplot as plt
+        mcl_ref = self.mcl
+        peak = mcl_ref._deflection.max(axis=1)
+        valley = mcl_ref._deflection.min(axis=1)
+        pos_ref = peak - valley
+        peak = mcl_odd._deflection.max(axis=1)
+        valley = mcl_odd._deflection.min(axis=1)
+        pos_odd = peak - valley
+        dpos = pos_odd - pos_ref
+        dis = Boston140Display()
+        plt.figure()
+        plt.clf()
+        plt.imshow(dis.map(dpos) / 1e-9)
+        plt.colorbar(label='peak to valley stroke difference [nm]')
 
     def show_inner_and_outer_calibration_curves_alone(self):
         import matplotlib.pyplot as plt
@@ -357,3 +374,35 @@ class Chap3():
         plt.figure()
         plt.imshow(0.5 * wf_ifs[y - 50: y + 50, x - 50: x + 50] / stroke)
         plt.colorbar()
+
+    def show_deformed_calibration_curves(self):
+        import matplotlib.pyplot as plt
+        mcl = MemsCommandLinearization.load(
+            'prova/misure_ripetute/mcl_all_def.fits')
+        mcl_bozzi = MemsCommandLinearization.load(
+            'prova/misure_con_tappo/trm_mcl_all_mod.fits')
+        plt.figure()
+        plt.clf()
+        plt.plot(
+            mcl._calibrated_cmd[15], mcl._calibrated_position[15] / 1e-6, 'r--', lw=0.9)
+        plt.plot(
+            mcl_bozzi._calibrated_cmd[15], mcl_bozzi._calibrated_position[15] / 1e-6, 'r-', label='15', lw=0.9)
+        plt.plot(
+            mcl._calibrated_cmd[15], mcl._calibrated_position[113] / 1e-6, 'b--', lw=0.9)
+        plt.plot(
+            mcl_bozzi._calibrated_cmd[15], mcl_bozzi._calibrated_position[113] / 1e-6, 'b-', label='113', lw=0.9)
+        plt.xlabel('Command [au]', size=10)
+        plt.ylabel('Surface deflection [$\mu$m]', size=10)
+        ptv = mcl._deflection[:, 0] - mcl._deflection[:, -1]
+        ptv_bozzi = mcl_bozzi._deflection[:, 0] - mcl_bozzi._deflection[:, -1]
+        print('Act 15:')
+        print('ptv_mcl:%g' % ptv[15])
+        print('ptv_mcl:%g' % ptv_bozzi[15])
+        print('Act 113:')
+        print('ptv_mcl:%g' % ptv[113])
+        print('ptv_mcl:%g' % ptv_bozzi[113])
+        plt.legend(loc='best')
+        plt.figure()
+        plt.clf()
+        plt.plot(ptv / 1e-6, '.')
+        plt.plot(ptv_bozzi / 1e-6, '.-')
