@@ -173,7 +173,7 @@ def analyze_and_comapre_with_male220701(j_index, amp_idx):
     import matplotlib.pylab as plt
     fname_male_a = 'prova/mems_mode_measurements/220629/z%d_act80.fits' % j_index
     male_a = MemsAmplitudeLinearityAnalizer(fname_male_a)
-    fname_male_b = 'prova/mems_mode_measurements/220701/z%d_act80.fits' % j_index
+    fname_male_b = 'prova/mems_mode_measurements/220701a/z%d_act80.fits' % j_index
     male_b = MemsAmplitudeLinearityAnalizer(fname_male_b)
     print('when mems clips:')
     print(male_a.get_clipped_modes_index_list())
@@ -216,3 +216,4 @@ def analyze_and_comapre_with_male220701(j_index, amp_idx):
     plt.imshow(fit_err_map_b)
     plt.colorbar()
     plt.title('fitting error map B')
+    return male_a, male_b

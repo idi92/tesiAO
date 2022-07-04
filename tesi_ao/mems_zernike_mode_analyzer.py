@@ -7,6 +7,8 @@ from arte.types.mask import CircularMask
 from tesi_ao.mems_reconstructor import MemsZonalReconstructor
 from tesi_ao.zernike_modal_reconstructor import ZernikeToZonal
 from arte.utils.zernike_generator import ZernikeGenerator
+from arte.utils import modal_decomposer
+from arte.types.wavefront import Wavefront
 
 
 class MemsModeMeasurer():
@@ -187,11 +189,17 @@ class MemsModeMeasurer():
 
 
 class MemsAmplitudeLinearityAnalizer():
+    NUM_DECOMPOSITION_MODES = 99
 
     def __init__(self, fname):
         self.wfs,  self.z_mode, self.exp_amp_vector, self.pos_vector, self._clip_vector, \
             self.selected_acts, self.mode_index,\
             self._thres_rms = MemsModeMeasurer.load(fname)
+        mmm = MemsModeMeasurer(ifs_fname=None, mcl_fname=None)
+        mmm.create_mask(radius=120, center=(231, 306))
+        self.mask = mmm.cmask_obj
+        self.md = modal_decomposer.ModalDecomposer(
+            self.NUM_DECOMPOSITION_MODES)
 
     def get_measured_amplitudes(self):
         self.meas_amp_vector = self.wfs.std(axis=(1, 2))
@@ -258,6 +266,16 @@ class MemsAmplitudeLinearityAnalizer():
                  1e-9, 'ro', label='clipped')
         plt.grid()
         plt.legend(loc='best')
+
+    def decompose_wavefront_on_zernike(self, wf):
+        import matplotlib.pyplot as plt
+        try:
+            zc = self.md.measureZernikeCoefficientsFromWavefront(
+                Wavefront(wf), self.mask)
+        except ValueError:
+            return np.zeros(self.NUM_DECOMPOSITION_MODES)
+        #plt.plot(zc.zernikeIndexes(), zc.toNumpyArray())
+        return zc.toNumpyArray()
 
     # def show_fitting_error_pattern(self):
     #     import matplotlib.pyplot as plt
