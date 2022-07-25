@@ -9,6 +9,7 @@ from tesi_ao.mems_max_stoke_coupling import CouplingMeasurer
 from tesi_ao.mems_display import Boston140Display
 from tesi_ao.mems_reconstructor import MemsZonalReconstructor
 from tesi_ao.mems_zonal_influence_functions_measurer import ZonalInfluenceFunctionMeasurer
+from pywt._thresholding import threshold
 
 
 class Chap3():
@@ -406,3 +407,53 @@ class Chap3():
         plt.clf()
         plt.plot(ptv / 1e-6, '.')
         plt.plot(ptv_bozzi / 1e-6, '.-')
+
+    def show_SVD_eigenvalues(self, vis_threshold=0.15):
+        import matplotlib.pyplot as plt
+        mfr = MemsFlatReshaper()
+        mfr.create_mask(radius=120, center=(231, 306))
+        mfr.create_reconstructor(set_thresh=vis_threshold)
+        mfr._mzr._get_svd()
+        Nact = mfr.number_of_selected_actuators
+        index = np.arange(1, Nact + 1)
+        singular_values = mfr._mzr.s
+        plt.figure()
+        plt.plot(index, singular_values, '.-')
+        plt.ylabel('Eigenvalues\t$\lambda_i$', size=10)
+        plt.xlabel('mode index', size=10)
+        plt.tight_layout()
+
+    def show_SVD_eigenvectors(self, vis_threshold=0.15, eigen_index=0):
+        import matplotlib.pyplot as plt
+        mfr = MemsFlatReshaper()
+        mfr.create_mask(radius=120, center=(231, 306))
+        mfr.create_reconstructor(set_thresh=vis_threshold)
+        mfr._mzr._get_svd()
+        wf = np.zeros((486, 640))
+        wf[mfr.cmask == False] = np.dot(
+            mfr.im, mfr._mzr.vh.T[:, eigen_index])
+        eigenmap = np.ma.array(wf, mask=mfr.cmask)
+        plt.figure()
+        plt.imshow(eigenmap)
+        plt.colorbar()
+
+    def show_SVD_test(self, vis_threshold=0.15):
+        import matplotlib.pyplot as plt
+        mfr = MemsFlatReshaper()
+        mfr.create_mask(radius=120, center=(231, 306))
+        mfr.create_reconstructor(set_thresh=vis_threshold)
+        Nact = mfr.number_of_selected_actuators
+        mfr._mzr._get_svd()
+        fig, axs = plt.subplots(5, 10)
+        eigen_index = 0
+        for i in range(5):
+            for j in range(10):
+                wf = np.zeros((486, 640))
+                wf[mfr.cmask == False] = np.dot(
+                    mfr.im, mfr._mzr.vh.T[:, eigen_index])
+                eigenmap = np.ma.array(wf, mask=mfr.cmask)
+                axs[i, j].imshow(eigenmap, vmin=-0.5, vmax=0.5,
+                                 cmap='jet', aspect='auto')
+                #axs[i, j].set_title('$\lambda_{%d}$' % eigen_index)
+                eigen_index += 1
+            #axs[i, j].colorbar()
