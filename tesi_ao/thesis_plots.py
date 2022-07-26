@@ -362,10 +362,12 @@ class Chap3():
         yn, xn = coord_max[0], coord_max[1]
 
         plt.figure()
-        plt.imshow(wfp[yp - 50: yp + 50, xp - 50: xp + 50] / 1e-9)
+        plt.imshow(wfp[yp - 50: yp + 50, xp - 50: xp + 50] /
+                   1e-9, vmax=500, cmap='jet', aspect='auto')
         plt.colorbar(label='[nm]')
         plt.figure()
-        plt.imshow(wfn[yn - 50: yn + 50, xn - 50: xn + 50] / 1e-9)
+        plt.imshow(wfn[yn - 50: yn + 50, xn - 50: xn + 50] /
+                   1e-9, vmin=-500, cmap='jet', aspect='auto')
         plt.colorbar(label='[nm]')
         dd = wfp - wfn
         wf_ifs = (dd - np.ma.median(dd))
@@ -373,7 +375,12 @@ class Chap3():
             np.abs(wfn) == np.max(np.abs(wfn)))[0]
         y, x = coord_max[0], coord_max[1]
         plt.figure()
-        plt.imshow(0.5 * wf_ifs[y - 50: y + 50, x - 50: x + 50] / stroke)
+        plt.imshow(wf_ifs[y - 50: y + 50, x -
+                          50: x + 50] / 1e-9, cmap='jet', aspect='auto')
+        plt.colorbar(label='[nm]')
+        plt.figure()
+        plt.imshow(0.5 * wf_ifs[y - 50: y + 50, x -
+                                50: x + 50] / stroke, cmap='jet', aspect='auto')
         plt.colorbar()
 
     def show_deformed_calibration_curves(self):
@@ -444,16 +451,42 @@ class Chap3():
         mfr.create_reconstructor(set_thresh=vis_threshold)
         Nact = mfr.number_of_selected_actuators
         mfr._mzr._get_svd()
+
         fig, axs = plt.subplots(5, 10)
+
         eigen_index = 0
-        for i in range(5):
-            for j in range(10):
-                wf = np.zeros((486, 640))
-                wf[mfr.cmask == False] = np.dot(
-                    mfr.im, mfr._mzr.vh.T[:, eigen_index])
-                eigenmap = np.ma.array(wf, mask=mfr.cmask)
-                axs[i, j].imshow(eigenmap, vmin=-0.5, vmax=0.5,
-                                 cmap='jet', aspect='auto')
-                #axs[i, j].set_title('$\lambda_{%d}$' % eigen_index)
-                eigen_index += 1
-            #axs[i, j].colorbar()
+
+        wffirst = np.zeros((486, 640))
+        wffirst[mfr.cmask == False] = np.dot(
+            mfr.im, mfr._mzr.vh.T[:, eigen_index])
+        first_eigenmap = np.ma.array(wffirst, mask=mfr.cmask)
+        min_val = first_eigenmap.min()
+        max_val = first_eigenmap.max()
+
+        for ax in axs.flat:
+            wf = np.zeros((486, 640))
+            wf[mfr.cmask == False] = np.dot(
+                mfr.im, mfr._mzr.vh.T[:, eigen_index])
+            eigenmap = np.ma.array(wf, mask=mfr.cmask)
+            im = ax.imshow(eigenmap, vmin=min_val, vmax=max_val,
+                           cmap='jet', aspect='auto')
+            ax.get_yaxis().set_visible(False)
+            ax.get_xaxis().set_visible(False)
+            eigen_index += 1
+
+        fig.colorbar(im, ax=axs.ravel().tolist())
+        # fig.colorbar(im)
+
+        # for i in range(5):
+        #     for j in range(10):
+        #         wf = np.zeros((486, 640))
+        #         wf[mfr.cmask == False] = np.dot(
+        #             mfr.im, mfr._mzr.vh.T[:, eigen_index])
+        #         eigenmap = np.ma.array(wf, mask=mfr.cmask)
+        #         axs[i, j].imshow(eigenmap, vmin=min_val, vmax=max_val,
+        #                          cmap='jet', aspect='auto')
+        #         axs[i, j].get_yaxis().set_visible(False)
+        #         axs[i, j].get_xaxis().set_visible(False)
+        #
+        #         #axs[i, j].set_title('$\lambda_{%d}$' % eigen_index)
+        #         eigen_index += 1
