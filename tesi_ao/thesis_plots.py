@@ -307,6 +307,11 @@ class Chap3():
         mfr.create_mask(radius=120, center=(231, 306))
         mfr.create_reconstructor(set_thresh=visibility_threshold)
         mfr._mzr._show_actuators_visibility()
+        dis = Boston140Display()
+        plt.figure()
+        plt.clf()
+        plt.imshow(dis.map(mfr._mzr._rms_wf) / 1e-9, cmap='jet')
+        plt.colorbar(label='$\sigma^{IF}_i$\t[nm]')
 
     def show_normalized_zifs_for_act(self, act=76):
         import matplotlib.pylab as plt
@@ -317,7 +322,7 @@ class Chap3():
         norm_ifs = mfr._mzr._normalized_ifs
         plt.figure()
         plt.clf()
-        plt.imshow(ifs[act] / 1e-9)
+        plt.imshow(ifs[act] / 1e-9, cmap='jet')
         plt.colorbar(label='[nm]')
         # plt.figure()
         # plt.clf()
@@ -328,11 +333,11 @@ class Chap3():
         y, x = coord_max[0], coord_max[1]
         plt.figure()
         plt.clf()
-        plt.imshow(norm_ifs[act, y - 50:y + 50, x - 50:x + 50])
+        plt.imshow(norm_ifs[act, y - 50:y + 50, x - 50:x + 50], cmap='jet')
         plt.colorbar(label='normalized')
         plt.figure()
         plt.clf()
-        plt.imshow(ifs[act, y - 50:y + 50, x - 50:x + 50] / 1e-9)
+        plt.imshow(ifs[act, y - 50:y + 50, x - 50:x + 50] / 1e-9, cmap='jet')
         plt.colorbar(label='[nm]')
 
         plt.figure()
@@ -382,6 +387,33 @@ class Chap3():
         plt.imshow(0.5 * wf_ifs[y - 50: y + 50, x -
                                 50: x + 50] / stroke, cmap='jet', aspect='auto')
         plt.colorbar()
+
+    def show_example_3D_IFS(self):
+        import matplotlib.pylab as plt
+        from mpl_toolkits.mplot3d import Axes3D
+        fname = 'prova/example_zifm_meas_pushpull500nm_act76.fits'
+        stroke, act_list, wfs_pos, wfs_neg, wfs_zero = ZonalInfluenceFunctionMeasurer._load_meas(
+            fname)
+        act = act_list[0]
+        wfp = wfs_pos[act] - wfs_zero[act]
+        wfn = wfs_neg[act] - wfs_zero[act]
+        dd = wfp - wfn
+        wf_ifs = (dd - np.ma.median(dd))
+        coord_max = np.argwhere(
+            np.abs(wfn) == np.max(np.abs(wfn)))[0]
+        y, x = coord_max[0], coord_max[1]
+        ifs = 0.5 * wf_ifs[y - 50: y + 50, x - 50: x + 50] / stroke
+        Z = ifs
+        n = Z.shape
+        print(n)
+        X = range(n[0])
+        Y = range(n[1])
+        X, Y = np.meshgrid(X, Y)
+        hf = plt.figure()
+        ha = hf.add_subplot(111, projection='3d')
+        map = ha.plot_surface(X, Y, Z, cmap='jet', vmin=Z.min(), vmax=Z.max())
+        hf.colorbar(map)
+        # ha.set_axis_off()
 
     def show_deformed_calibration_curves(self):
         import matplotlib.pyplot as plt

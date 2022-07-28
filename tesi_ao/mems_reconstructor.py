@@ -94,8 +94,8 @@ class MemsZonalReconstructor(object):
         plt.ion()
         plt.plot(self._rms_wf / 1.e-9, 'o', label='push/pull %g m' %
                  self._ifs_stroke)
-        plt.xlabel('# actuator', size=10)
-        plt.ylabel('Surface rms [nm]', size=10)
+        plt.xlabel('# Actuator', size=10)
+        plt.ylabel('$\sigma^{IF}_i$\t[nm]', size=10)
         plt.grid()
         plt.legend(loc='best')
 
@@ -106,9 +106,11 @@ class MemsZonalReconstructor(object):
                  self._ifs_stroke)
         ax2.plot(self._rms_wf / self._rms_wf.max(), '.')
 
-        ax1.set_xlabel('# actuators', size=10)
-        ax1.set_ylabel('Surface rms [nm]', size=10)
-        ax2.set_ylabel('Normalized surface rms', size=10)
+        ax1.set_xlabel('# Actuator', size=10)
+        ax1.set_ylabel('$\sigma^{IF}_i$\t[nm]', size=10)
+        ax2.set_ylabel('$\sigma^{IF}_i/\sigma^{IF}_{max}$', size=10)
+        ax2.hlines(self.THRESHOLD_RMS, xmin=0, xmax=140,
+                   colors='r', linestyles='--')
 
     @property
     def selected_actuators(self):
