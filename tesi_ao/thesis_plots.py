@@ -10,6 +10,8 @@ from tesi_ao.mems_display import Boston140Display
 from tesi_ao.mems_reconstructor import MemsZonalReconstructor
 from tesi_ao.mems_zonal_influence_functions_measurer import ZonalInfluenceFunctionMeasurer
 from pywt._thresholding import threshold
+from tesi_ao.mems_command_to_position_linearization_analyzer import CommandToPositionLinearizationAnalyzer
+from numpy.lib.tests.test_format import dtype
 
 
 class Chap3():
@@ -129,6 +131,7 @@ class Chap3():
         plt.clf()
         plt.imshow(dis.map(pos) / 1e-6)
         plt.colorbar(label='peak to valley stroke [$\mu$m]')
+        self._add_acts_labels_to_display()
 
     def display_acts_ptv_difference_between_calibration(self, mcl_odd):
         import matplotlib.pyplot as plt
@@ -184,7 +187,7 @@ class Chap3():
 
         cta.show_crosstalk_along_x_axis()
         cta.show_crosstalk_along_y_axis()
-        cta.measure_crosstalk()
+        print(cta.measure_crosstalk())
 
     def show_act_coupling_next_to(self, act=76):
         import matplotlib.pyplot as plt
@@ -192,17 +195,23 @@ class Chap3():
         cm = CouplingMeasurer(act - 12 + 1, 3)
         cm.pos, cm.act_list, cm.wfs_poke, cm.wf_pos, cm.wf_neg, cm.act_pix_coord = CouplingMeasurer.load(
             fname)
+        print(cm.pos)
         dis = Boston140Display()
         pos_poke = cm.get_poke_act_stoke()
         pos_ptv = cm.get_actuators_ptv()
         plt.figure()
         plt.clf()
-        plt.imshow(dis.map(pos_poke) / 1e-9)
-        plt.colorbar()
+        plt.imshow(dis.map(pos_poke) / 1e-9, cmap='jet',
+                   vmin=pos_poke.min() / 1e-9, vmax=pos_poke.max() / 1e-9)
+        plt.colorbar(label='[$nm$]')
+        self._add_acts_labels_to_display()
         plt.figure()
         plt.clf()
-        plt.imshow(dis.map(pos_ptv) / 1e-9)
-        plt.colorbar()
+        plt.imshow(dis.map(pos_ptv) / 1e-6, cmap='jet',
+                   vmin=pos_ptv.min() / 1e-9, vmax=pos_ptv.max() / 1e-6)
+        plt.colorbar(label='[$\mu m$]')
+        self._add_acts_labels_to_display()
+        return cm.wf_pos, cm.wf_neg
 
     def show_flattening_results(self, j_idx):
         import matplotlib.pyplot as plt
@@ -241,13 +250,24 @@ class Chap3():
         print('starting amplitude for wfstart_idx=%d:' % j_idx)
         print(data[:, j_idx, 0] / 1e-9)
         print(yerr[:, j_idx, 0] / 1e-9)
-
+        # fare media con errore la somma in quadratura!!! non std
         print('convergence amplitude for wfstart_idx=%d:' % j_idx)
-        print(final_ampls.mean(axis=2)[:, j] / 1e-9)
-        print(final_ampls.std(axis=2)[:, j] / 1e-9)
         print('All in nm!')
+        for i, thres in enumerate(thres_list):
+            weights = 1 / (yerr[i, j, 2:]**2)
+            a_i = data[i, j, 2:]
+            a_mean = (a_i * weights).sum() / weights.sum()
+            err_a_mean = 1 / np.sqrt(weights.sum())
+            print('for threshold %g' % thres)
+            print(a_mean / 1e-9)
+            print(err_a_mean / 1e-9)
 
-    def show_exemples_of_flatten_wfs(self):
+        # print('convergence amplitude for wfstart_idx=%d:' % j_idx)
+        # print(final_ampls.mean(axis=2)[:, j] / 1e-9)
+        # print(final_ampls.std(axis=2)[:, j] / 1e-9)
+        # print('All in nm!')
+
+    def show_examples_of_flatten_wfs(self):
         import matplotlib.pyplot as plt
         mfr = MemsFlatReshaper()
         mfr.load_acquired_measures_4plot()
@@ -258,11 +278,13 @@ class Chap3():
             print('a_out = %g' % wf_output.std())
             plt.figure()
             plt.clf()
-            plt.imshow(wf_input / 1e-6)
+            plt.imshow(wf_input / 1e-6, cmap='jet',
+                       vmin=wf_input.min() / 1e-6, vmax=wf_input.max() / 1e-6)
             plt.colorbar(label='[$\mu$m]')
             plt.figure()
             plt.clf()
-            plt.imshow(wf_output / 1e-9)
+            plt.imshow(wf_output / 1e-9, cmap='jet',
+                       vmin=wf_output.min() / 1e-9, vmax=wf_output.max() / 1e-9)
             plt.colorbar(label='[nm]')
 
         print('input surface (1000nm rand):')
@@ -279,11 +301,34 @@ class Chap3():
         wf_output = wfs[4, -1, 0, 9]
         do_plot(wf_input, wf_output)
 
-        print('output surface (flat_cmd):')
+        print('output surface (input flat_cmd):')
         print('selected 80 acts:')
         wf_input = wfs[2, 0, 0, 0]
         wf_output = wfs[2, 0, 0, -1]
         do_plot(wf_input, wf_output)
+
+        def do_3Dplot(wf_input, wf_output):
+            from mpl_toolkits.mplot3d import Axes3D
+            Z1 = wf_input / 1e-6
+            frame_shape = wf_input.shape
+            X = range(frame_shape[1])
+            Y = range(frame_shape[0])
+            X, Y = np.meshgrid(X, Y)
+            hf1 = plt.figure()
+            ha1 = hf1.add_subplot(111, projection='3d')
+            map1 = ha1.plot_surface(
+                X, Y, Z1, cmap='jet', vmin=Z1.min(), vmax=Z1.max())
+            hf1.colorbar(map1)
+            Z2 = wf_output / 1e-9
+            hf2 = plt.figure()
+            ha2 = hf2.add_subplot(111, projection='3d')
+            map2 = ha2.plot_surface(
+                X, Y, Z2, cmap='jet', vmin=Z2.min(), vmax=Z2.max())
+            hf2.colorbar(map2)
+        # selected 80 acts:
+        wf_input = wfs[2, -1, 7, 0]
+        wf_output = wfs[2, -1, 7, 4]
+        do_3Dplot(wf_input, wf_output)
 
     def display_selected_actuators(self, visibility_threshold=0.15):
         import matplotlib.pyplot as plt
@@ -312,6 +357,7 @@ class Chap3():
         plt.clf()
         plt.imshow(dis.map(mfr._mzr._rms_wf) / 1e-9, cmap='jet')
         plt.colorbar(label='$\sigma^{IF}_i$\t[nm]')
+        self._add_acts_labels_to_display()
 
     def show_normalized_zifs_for_act(self, act=76):
         import matplotlib.pylab as plt
@@ -522,3 +568,107 @@ class Chap3():
         #
         #         #axs[i, j].set_title('$\lambda_{%d}$' % eigen_index)
         #         eigen_index += 1
+
+    def show_old_measurements_visibility(self):
+        import matplotlib.pyplot as plt
+        cpla_fname = 'prova/all_act/sandbox/cplm_all_fixed.fits'
+        mcl_fname = 'prova/all_act/sandbox/mcl_all_fixedpix.fits'
+        cpla = CommandToPositionLinearizationAnalyzer(cpla_fname)
+        mcl = MemsCommandLinearization.load(mcl_fname)
+        mg = main220316.ModeGenerator(cpla, mcl)
+        mg.NORM_AT_THIS_CMD = 0
+        mg.VISIBLE_AT_THIS_CMD = mg.NORM_AT_THIS_CMD
+        mg.compute_reconstructor(mask_obj=None)
+        dis = Boston140Display()
+        plt.figure()
+        plt.clf()
+        plt.imshow(dis.map(mg._rms_wf) / 1e-9, vmin=0,
+                   vmax=mg._rms_wf.max() / 1e-9, cmap='jet')
+        plt.colorbar(label='$\sigma^{max}_i$\t[nm]')
+        self._add_acts_labels_to_display()
+        # act_text = np.ma.zeros((12, 12), dtype=int)
+        # act_text = np.ma.array(data=act_text, mask=act_text)
+        # act_text.mask[0, 0] = True
+        # act_text.mask[-1, 0] = True
+        # act_text.mask[0, -1] = True
+        # act_text.mask[-1, -1] = True
+        # act_text.data[act_text.mask == False] = np.arange(140)
+        # for (i, j), txt_label in np.ndenumerate(dis.map(np.arange(140))):
+        #     if (act_text.mask[i, j] == False):
+        #         plt.text(j, i, int(txt_label), ha='center', va='center')
+
+    def show_old_detector_mask_example(self):
+        import matplotlib.pyplot as plt
+        cpla_fname = 'prova/all_act/sandbox/cplm_all_fixed.fits'
+        cpla = CommandToPositionLinearizationAnalyzer(cpla_fname)
+        wfs = cpla._wfs
+        cmd = 0
+        plt.figure()
+        plt.imshow(wfs[4, cmd] / 1e-9, cmap='jet')
+        plt.colorbar(label='$[nm]$')
+        plt.figure()
+        plt.imshow(wfs[15, cmd] / 1e-9, cmap='jet')
+        plt.colorbar(label='$[nm]$')
+        plt.figure()
+        plt.imshow(wfs[27, cmd] / 1e-9, cmap='jet')
+        plt.colorbar(label='$[nm]$')
+        plt.figure()
+        px = 257
+        scale = 1e-6
+        plt.plot(wfs[4, cmd, px, :] / scale, '-', label='4')
+        plt.plot(wfs[15, cmd, px, :] / scale, '-', label='15')
+        plt.plot(wfs[27, cmd, px, :] / scale, '-', label='27')
+        plt.plot(wfs[111, cmd, px, :] / scale, '-', label='111')
+        plt.plot(wfs[123, cmd, px, :] / scale, '-', label='123')
+        plt.plot(wfs[134, cmd, px, :] / scale, '-', label='134')
+
+        Z1 = wfs[4, cmd] / scale
+        Z2 = wfs[15, cmd] / scale
+        Z3 = wfs[27, cmd] / scale
+        Z4 = wfs[63, cmd] / scale
+        z_max = Z4.max()
+        z_min = Z4.min()
+        n = wfs.shape
+        X = range(n[-1])
+        Y = range(n[-2])
+        X, Y = np.meshgrid(X, Y)
+
+        # hf = plt.figure()
+        # ha = hf.add_subplot(111, projection='3d')
+        # map = ha.plot_surface(X, Y, Z1, cmap='jet',
+        #                       vmin=Z1.min(), vmax=Z1.max())
+        # hf.colorbar(map)
+        #
+        # hf = plt.figure()
+        # ha = hf.add_subplot(111, projection='3d')
+        # map = ha.plot_surface(X, Y, Z2, cmap='jet',
+        #                       vmin=Z2.min(), vmax=Z2.max())
+        # hf.colorbar(map)
+
+        n = wfs.shape
+        hf = plt.figure()
+        ha = hf.add_subplot(111, projection='3d')
+        ha.plot_surface(X, Y, Z1, cmap='jet',
+                        vmin=z_min, vmax=z_max)
+        ha.plot_surface(X + 200, Y + 200, Z2, cmap='jet',
+                        vmin=z_min, vmax=z_max)
+        ha.plot_surface(X + 400, Y + 400, Z3, cmap='jet',
+                        vmin=z_min, vmax=z_max)
+        map = ha.plot_surface(X + 600, Y + 600, Z4, cmap='jet',
+                              vmin=z_min, vmax=z_max)
+        hf.colorbar(map, label='Surface deflection\t' + '$[\mu m]$')
+        ha.set_axis_off()
+
+    def _add_acts_labels_to_display(self):
+        import matplotlib.pyplot as plt
+        dis = Boston140Display()
+        act_text = np.ma.zeros((12, 12), dtype=int)
+        act_text = np.ma.array(data=act_text, mask=act_text)
+        act_text.mask[0, 0] = True
+        act_text.mask[-1, 0] = True
+        act_text.mask[0, -1] = True
+        act_text.mask[-1, -1] = True
+        act_text.data[act_text.mask == False] = np.arange(140)
+        for (i, j), txt_label in np.ndenumerate(dis.map(np.arange(140))):
+            if (act_text.mask[i, j] == False):
+                plt.text(j, i, int(txt_label), ha='center', va='center')
