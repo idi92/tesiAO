@@ -14,6 +14,68 @@ from tesi_ao.mems_command_to_position_linearization_analyzer import CommandToPos
 from numpy.lib.tests.test_format import dtype
 
 
+class Chap2():
+
+    mcl_fname = 'prova/misure_ripetute/mcl_all_def.fits'
+
+    def __init__(self):
+        self.mcl = MemsCommandLinearization.load(self.mcl_fname)
+
+    def _add_acts_labels_to_display(self):
+        import matplotlib.pyplot as plt
+        dis = Boston140Display()
+        act_text = np.ma.zeros((12, 12), dtype=int)
+        act_text = np.ma.array(data=act_text, mask=act_text)
+        act_text.mask[0, 0] = True
+        act_text.mask[-1, 0] = True
+        act_text.mask[0, -1] = True
+        act_text.mask[-1, -1] = True
+        act_text.data[act_text.mask == False] = np.arange(140)
+        for (i, j), txt_label in np.ndenumerate(dis.map(np.arange(140))):
+            if (act_text.mask[i, j] == False):
+                plt.text(j, i, int(txt_label), ha='center', va='center')
+
+    def display_flat_shape_cmd(self):
+        import matplotlib.pyplot as plt
+        cmd_flat = -self.mcl._cmd_vector[:, 0]
+        dis = Boston140Display()
+        plt.figure()
+        plt.imshow(dis.map(cmd_flat),  cmap='jet',
+                   vmin=cmd_flat.min(), vmax=0.95)
+        plt.colorbar(label='Normalized bias command')
+        self._add_acts_labels_to_display()
+
+    def show_an_act_curve_example(self, act=31):
+        import matplotlib.pyplot as plt
+        plt.figure()
+        fig, ax1 = plt.subplots()
+        ax2 = ax1.twiny()
+        # ax1.plot(self._rms_wf / 1.e-9, '.', label='push/pull %g m' %
+        #          self._ifs_stroke)
+        # ax2.plot(self._rms_wf / self._rms_wf.max(), '.')
+        #
+        # ax1.set_xlabel('# Actuator', size=10)
+        # ax1.set_ylabel('$\sigma^{IF}_i$\t[nm]', size=10)
+        # ax2.set_ylabel('$\sigma^{IF}_i/\sigma^{IF}_{max}$', size=10)
+        scale = 1e-6
+        ax1.plot(self.mcl._calibrated_cmd[act],
+                 self.mcl._calibrated_position[act] / scale, '-k', label='%d' % act)
+        ax1.set_xlabel('Command [au]', size=10)
+        ax1.set_ylabel('Deflection [$\mu$m]', size=10)
+        ax1.legend(loc='best')
+        ax1.axhline(0, linestyle='--', color='gray')
+        ax1.axvline(0, linestyle='--', color='gray')
+        volt_between01 = np.linspace(
+            0, 1, len(self.mcl._calibrated_position[act]))
+        ax2.plot(volt_between01,
+                 self.mcl._calibrated_position[act] / scale, 'k-')
+
+        cmd_flat = -self.mcl._cmd_vector[:, 0]
+
+        ax2.set_xticks([0., cmd_flat[act], 1])
+        ax2.set_xlabel('Normalized command [au]', size=10)
+
+
 class Chap3():
     mcl_fname = 'prova/misure_ripetute/mcl_all_def.fits'
 
@@ -335,16 +397,17 @@ class Chap3():
         mfr = MemsFlatReshaper()
         mfr.create_mask(radius=120, center=(231, 306))
         mfr.create_reconstructor(set_thresh=visibility_threshold)
-        actuators = np.zeros(mfr.number_of_actuators)
+        actuators = np.zeros(mfr.number_of_actuators) + 0.75
         selected_acts = mfr.selected_actuators
         actuators[selected_acts] = 1
         n_of_selected_acts = len(selected_acts)
         dis = Boston140Display()
         plt.figure()
         plt.clf()
-        plt.imshow(dis.map(actuators))
+        plt.imshow(dis.map(actuators), cmap='gray')
         print('visibility threshold set to:%g' % visibility_threshold)
         print('selected acts:%d' % n_of_selected_acts)
+        self._add_acts_labels_to_display()
 
     def show_ifs_visibility_on_pupil(self, visibility_threshold=0.15):
         import matplotlib.pyplot as plt
